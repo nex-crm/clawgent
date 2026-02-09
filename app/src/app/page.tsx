@@ -25,6 +25,7 @@ interface Persona {
   color: string;
   skills: SkillSummary[];
   recommendedModel: "anthropic" | "google" | "openai";
+  sprite: string | null;
 }
 
 /** Build SkillSummary[] from PERSONA_CONFIGS for a given persona id */
@@ -49,6 +50,7 @@ const PERSONAS: Persona[] = [
     color: "arcade-pink",
     skills: buildSkillSummaries("marketing-pro"),
     recommendedModel: "anthropic",
+    sprite: "/sprites/character-1.png",
   },
   {
     id: "sales-assistant",
@@ -58,6 +60,7 @@ const PERSONAS: Persona[] = [
     color: "arcade-yellow",
     skills: buildSkillSummaries("sales-assistant"),
     recommendedModel: "anthropic",
+    sprite: "/sprites/character-2.png",
   },
   {
     id: "lead-gen",
@@ -67,6 +70,7 @@ const PERSONAS: Persona[] = [
     color: "arcade-orange",
     skills: buildSkillSummaries("lead-gen"),
     recommendedModel: "google",
+    sprite: "/sprites/character-3.png",
   },
   {
     id: "dev-copilot",
@@ -76,6 +80,7 @@ const PERSONAS: Persona[] = [
     color: "arcade-green",
     skills: buildSkillSummaries("dev-copilot"),
     recommendedModel: "anthropic",
+    sprite: "/sprites/character-4.png",
   },
   {
     id: "support-agent",
@@ -85,6 +90,7 @@ const PERSONAS: Persona[] = [
     color: "arcade-blue",
     skills: buildSkillSummaries("support-agent"),
     recommendedModel: "anthropic",
+    sprite: "/sprites/character-5.png",
   },
   {
     id: "ops-automator",
@@ -94,6 +100,7 @@ const PERSONAS: Persona[] = [
     color: "arcade-purple",
     skills: buildSkillSummaries("ops-automator"),
     recommendedModel: "google",
+    sprite: "/sprites/character-6.png",
   },
   {
     id: "founder-sidekick",
@@ -103,6 +110,7 @@ const PERSONAS: Persona[] = [
     color: "arcade-orange",
     skills: buildSkillSummaries("founder-sidekick"),
     recommendedModel: "anthropic",
+    sprite: "/sprites/character-7.png",
   },
   {
     id: "data-analyst",
@@ -112,15 +120,17 @@ const PERSONAS: Persona[] = [
     color: "arcade-blue",
     skills: buildSkillSummaries("data-analyst"),
     recommendedModel: "google",
+    sprite: "/sprites/character-8.png",
   },
   {
     id: "gtm-engineer",
     name: "GTM ENGINEER",
     tagline: "Your CRM is a mess. This agent doesn't judge, it fixes.",
-    icon: "\uD83D\uDE80",
+    icon: "\u26A1",
     color: "arcade-red",
     skills: buildSkillSummaries("gtm-engineer"),
     recommendedModel: "anthropic",
+    sprite: "/sprites/character-9.png",
   },
 ];
 
@@ -215,25 +225,63 @@ function colorToTw(
 }
 
 function colorToCssVar(color: string): string {
-  return `var(--color-${color})`;
+  // Use the raw :root CSS custom property (e.g. --arcade-blue),
+  // NOT the Tailwind @theme token (--color-arcade-blue) which
+  // doesn't resolve outside Tailwind's utility class context.
+  return `var(--${color})`;
 }
 
 // ─── Main Component ─────────────────────────────────────────────────
 
 export default function Home() {
+  // Feature flags
+  const SHOW_INTEGRATIONS = false; // Set to true when Slack/integrations are ready
+
   // Auth state (works with or without WorkOS)
   const { user: authUser, loading: authLoading } = useAuthSafe();
 
   // Screen state machine
   const [screen, setScreen] = useState<
-    "start" | "select" | "apikey" | "deploying"
+    "start" | "select" | "apikey" | "powerups" | "deploying"
   >("start");
   const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
   const [hoveredPersona, setHoveredPersona] = useState<Persona | null>(null);
+  const [gridIndex, setGridIndex] = useState(0); // 0-8 for 3x3 grid keyboard nav
   const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
   const [selectedProvider, setSelectedProvider] =
     useState<Provider>("anthropic");
   const [apiKey, setApiKey] = useState("");
+
+  // Channel integrations (power-ups)
+  // Setup channels: collected during deploy flow, sent to API after instance is running
+  const [setupChannels, setSetupChannels] = useState<{
+    slack?: { appToken: string; botToken: string; userToken?: string };
+    telegram?: { botToken: string };
+    discord?: { token: string };
+  }>({});
+
+  // Live channel state from the API (for the home screen)
+  const [liveChannels, setLiveChannels] = useState<{
+    type: string;
+    enabled: boolean;
+    status: "connected" | "disconnected" | "error";
+    error?: string;
+  }[]>([]);
+  const [channelsLoading, setChannelsLoading] = useState(false);
+  const [channelActionLoading, setChannelActionLoading] = useState<string | null>(null); // channel type being toggled
+  const [channelError, setChannelError] = useState<string | null>(null);
+  const [channelSuccess, setChannelSuccess] = useState<string | null>(null);
+  const [expandedChannel, setExpandedChannel] = useState<string | null>(null);
+  // Temp credential inputs for connecting channels on home screen
+  const [channelInputs, setChannelInputs] = useState<{
+    slack: { appToken: string; botToken: string; userToken?: string };
+    telegram: { botToken: string };
+    discord: { token: string };
+  }>({
+    slack: { appToken: "", botToken: "", userToken: "" },
+    telegram: { botToken: "" },
+    discord: { token: "" },
+  });
 
   // System & instance state
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
@@ -260,6 +308,12 @@ export default function Home() {
   const [addingAgent, setAddingAgent] = useState(false);
   const [showAddAgentSelect, setShowAddAgentSelect] = useState(false);
   const [addAgentHovered, setAddAgentHovered] = useState<Persona | null>(null);
+
+  // Start menu state (SNES-style select)
+  const [startMenuIndex, setStartMenuIndex] = useState(0);
+  const [snarkyMessage, setSnarkyMessage] = useState<string | null>(null);
+  const [nopeShake, setNopeShake] = useState(false);
+  const snarkyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ─── Sound State ───────────────────────────────────────────
   const [soundMuted, setSoundMuted] = useState(false);
@@ -354,6 +408,116 @@ export default function Home() {
     }
   }, []);
 
+  // Fetch channel status for an instance
+  const fetchChannels = useCallback(async (instanceId: string) => {
+    setChannelsLoading(true);
+    try {
+      const res = await fetch(`/api/instances/${instanceId}/channels`);
+      if (res.ok) {
+        const data = await res.json();
+        setLiveChannels(data.channels ?? []);
+      }
+    } catch {
+      // ignore — channels endpoint may not be ready yet
+    } finally {
+      setChannelsLoading(false);
+    }
+  }, []);
+
+  // Connect a channel via POST
+  const connectChannel = useCallback(async (instanceId: string, type: string, config: Record<string, string>) => {
+    setChannelActionLoading(type);
+    setChannelError(null);
+    setChannelSuccess(null);
+    try {
+      const res = await fetch(`/api/instances/${instanceId}/channels`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, config }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        ArcadeSounds.deploySuccess();
+        setChannelSuccess(`${type.toUpperCase()} CONNECTED`);
+        setExpandedChannel(null);
+        // Reset inputs for this channel
+        setChannelInputs((prev) => ({
+          ...prev,
+          ...(type === "slack" ? { slack: { appToken: "", botToken: "", userToken: "" } } : {}),
+          ...(type === "telegram" ? { telegram: { botToken: "" } } : {}),
+          ...(type === "discord" ? { discord: { token: "" } } : {}),
+        }));
+        // Refresh channel list
+        await fetchChannels(instanceId);
+        // Clear success after a few seconds
+        setTimeout(() => setChannelSuccess(null), 3000);
+      } else {
+        ArcadeSounds.deployError();
+        setChannelError(data.error ?? `Failed to connect ${type}`);
+        setTimeout(() => setChannelError(null), 5000);
+      }
+    } catch (err) {
+      ArcadeSounds.deployError();
+      setChannelError(err instanceof Error ? err.message : `Failed to connect ${type}`);
+      setTimeout(() => setChannelError(null), 5000);
+    } finally {
+      setChannelActionLoading(null);
+    }
+  }, [fetchChannels]);
+
+  // Disconnect a channel via DELETE
+  const disconnectChannel = useCallback(async (instanceId: string, type: string) => {
+    setChannelActionLoading(type);
+    setChannelError(null);
+    setChannelSuccess(null);
+    try {
+      const res = await fetch(`/api/instances/${instanceId}/channels/${type}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        ArcadeSounds.destroy();
+        setChannelSuccess(`${type.toUpperCase()} DISCONNECTED`);
+        setExpandedChannel(null);
+        await fetchChannels(instanceId);
+        setTimeout(() => setChannelSuccess(null), 3000);
+      } else {
+        ArcadeSounds.deployError();
+        setChannelError(data.error ?? `Failed to disconnect ${type}`);
+        setTimeout(() => setChannelError(null), 5000);
+      }
+    } catch (err) {
+      ArcadeSounds.deployError();
+      setChannelError(err instanceof Error ? err.message : `Failed to disconnect ${type}`);
+      setTimeout(() => setChannelError(null), 5000);
+    } finally {
+      setChannelActionLoading(null);
+    }
+  }, [fetchChannels]);
+
+  // Configure channels collected during deploy flow (after instance is running)
+  const configureSetupChannels = useCallback(async (instanceId: string) => {
+    const entries = Object.entries(setupChannels) as [string, Record<string, string>][];
+    for (const [type, config] of entries) {
+      // Only connect channels that have actual credentials filled in
+      const hasCredentials = Object.values(config).every((v) => v && v.trim().length > 0);
+      if (hasCredentials) {
+        try {
+          await fetch(`/api/instances/${instanceId}/channels`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type, config }),
+          });
+        } catch {
+          // non-blocking — channels can be configured later from the home screen
+        }
+      }
+    }
+    setSetupChannels({});
+    // Refresh channel list after all are configured
+    await fetchChannels(instanceId);
+  }, [setupChannels, fetchChannels]);
+
   // Add an agent to the instance
   const addAgentToInstance = useCallback(async (instanceId: string, persona: string | null) => {
     setAddingAgent(true);
@@ -425,6 +589,9 @@ export default function Home() {
               setShowReady(true);
               ArcadeSounds.deploySuccess();
             }, 1500);
+
+            // Configure any channels collected during deploy flow
+            configureSetupChannels(data.id);
           }
           if (data.status === "error") {
             ArcadeSounds.deployError();
@@ -434,7 +601,7 @@ export default function Home() {
         // ignore
       }
     },
-    [fetchStatus, fetchUserData]
+    [fetchStatus, fetchUserData, configureSetupChannels]
   );
 
   useEffect(() => {
@@ -456,6 +623,15 @@ export default function Home() {
       setAgents([]);
     }
   }, [userInstance, fetchAgents]);
+
+  // Fetch channels when user has a running instance
+  useEffect(() => {
+    if (userInstance?.status === "running") {
+      fetchChannels(userInstance.id);
+    } else {
+      setLiveChannels([]);
+    }
+  }, [userInstance, fetchChannels]);
 
   // Poll active instance
   useEffect(() => {
@@ -540,6 +716,7 @@ export default function Home() {
           provider: selectedProvider,
           apiKey: apiKey.trim(),
           ...(selectedPersona ? { persona: selectedPersona.id } : {}),
+          ...(Object.keys(setupChannels).length > 0 ? { channels: setupChannels } : {}),
         }),
       });
       const data = await res.json();
@@ -600,6 +777,8 @@ export default function Home() {
       }
       setUserInstance(null);
       setAgents([]);
+      setLiveChannels([]);
+      setExpandedChannel(null);
       setShowAddAgentSelect(false);
       setScreen("start");
       fetchStatus();
@@ -619,23 +798,419 @@ export default function Home() {
     setShowReady(false);
   }
 
-  // ─── Persona lookup helper ────────────────────────────────────
-
-  function getPersonaById(id: string | undefined): Persona | undefined {
-    return PERSONAS.find((p) => p.id === id);
-  }
-
   // ─── Derived state ────────────────────────────────────────────
 
   const isLoading = authLoading || userDataLoading;
   const isAuthenticated = !!authUser;
   const hasInstance = !!userInstance && (userInstance.status === "running" || userInstance.status === "starting");
 
+  // ─── Start Menu Actions ─────────────────────────────────────────
+
+  const SNARKY_LINES = [
+    "Your competitors say thanks.",
+    "Brave. Wrong, but brave.",
+    "Cool. Your competitors just deployed three.",
+    "You'll be back. They always come back.",
+    "That's the spirit. Of 2019.",
+    "*The agents will remember this.*",
+  ];
+
+  const handleDeployOption = useCallback(() => {
+    ArcadeSounds.select();
+    ArcadeSounds.screenTransition();
+    if (!isAuthenticated) {
+      handleSignIn();
+    } else {
+      setScreen("select");
+    }
+  }, [isAuthenticated]);
+
+  const handleStayIrrelevant = useCallback(() => {
+    ArcadeSounds.back();
+    setNopeShake(true);
+    setTimeout(() => setNopeShake(false), 400);
+
+    const line = SNARKY_LINES[Math.floor(Math.random() * SNARKY_LINES.length)];
+    setSnarkyMessage(line);
+
+    if (snarkyTimeoutRef.current) clearTimeout(snarkyTimeoutRef.current);
+    snarkyTimeoutRef.current = setTimeout(() => {
+      setSnarkyMessage(null);
+      setStartMenuIndex(0);
+      ArcadeSounds.cursorMove();
+    }, 1800);
+  }, []);
+
+  const handleStartMenuSelect = useCallback(() => {
+    if (startMenuIndex === 0) {
+      handleDeployOption();
+    } else {
+      handleStayIrrelevant();
+    }
+  }, [startMenuIndex, handleDeployOption, handleStayIrrelevant]);
+
+  // Keyboard navigation for start menu
+  useEffect(() => {
+    if (screen !== "start" || isLoading || hasInstance) return;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        setStartMenuIndex(0);
+        setSnarkyMessage(null);
+        ArcadeSounds.cursorMove();
+      } else if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+        e.preventDefault();
+        setStartMenuIndex(1);
+        setSnarkyMessage(null);
+        ArcadeSounds.cursorMove();
+      } else if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        handleStartMenuSelect();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [screen, isLoading, hasInstance, handleStartMenuSelect]);
+
+  // ─── Select screen: keyboard navigation (3x3 grid) ─────────────
+
+  useEffect(() => {
+    if (screen !== "select") return;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      const cols = 3;
+      const total = PERSONAS.length; // 9
+      let newIndex = gridIndex;
+
+      switch (e.key) {
+        case "ArrowUp":
+          e.preventDefault();
+          newIndex = gridIndex - cols >= 0 ? gridIndex - cols : gridIndex;
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          newIndex = gridIndex + cols < total ? gridIndex + cols : gridIndex;
+          break;
+        case "ArrowLeft":
+          e.preventDefault();
+          newIndex = gridIndex % cols > 0 ? gridIndex - 1 : gridIndex;
+          break;
+        case "ArrowRight":
+          e.preventDefault();
+          newIndex = (gridIndex % cols) < cols - 1 && gridIndex + 1 < total ? gridIndex + 1 : gridIndex;
+          break;
+        case "Enter":
+        case " ":
+          e.preventDefault();
+          handlePersonaSelect(PERSONAS[gridIndex]);
+          return;
+        case "Escape":
+          e.preventDefault();
+          handleBackToStart();
+          return;
+        default:
+          return;
+      }
+
+      if (newIndex !== gridIndex) {
+        setGridIndex(newIndex);
+        setHoveredPersona(PERSONAS[newIndex]);
+        setExpandedSkill(null);
+        playCursorMove();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [screen, gridIndex, playCursorMove]);
+
+  // ─── Persona lookup helper ────────────────────────────────────
+
+  function getPersonaById(id: string | undefined): Persona | undefined {
+    return PERSONAS.find((p) => p.id === id);
+  }
+
+  // ─── Shared Persona Icon (sprite or emoji fallback) ───────────
+
+  function PersonaIcon({ persona, size = "cell" }: { persona: Persona; size?: "cell" | "preview" }) {
+    if (persona.sprite) {
+      if (size === "cell") {
+        // Cell sprites: absolutely positioned, fill the cell via CSS
+        return (
+          <img
+            src={persona.sprite}
+            alt={persona.name}
+            className="sf2-cell-sprite"
+            draggable={false}
+          />
+        );
+      }
+      // Preview sprites: fixed size with glow
+      return (
+        <img
+          src={persona.sprite}
+          alt={persona.name}
+          className="w-20 h-20 sm:w-24 sm:h-24 object-contain"
+          style={{ filter: `drop-shadow(0 0 6px ${colorToCssVar(persona.color)})` }}
+          draggable={false}
+        />
+      );
+    }
+    // Emoji fallback
+    if (size === "preview") {
+      return <span className="sf2-preview-icon">{persona.icon}</span>;
+    }
+    return <span className="sf2-cell-icon">{persona.icon}</span>;
+  }
+
+  // ─── Shared Persona Select Screen ─────────────────────────────
+
+  interface PersonaSelectConfig {
+    title: string;
+    subtitle: string;
+    actionLabel: string;
+    backLabel: string;
+    scratchLabel: string;
+    kbHint: string;
+    hoveredPersona: Persona | null;
+    activeGridIndex: number;
+    isLoading: boolean;
+    onCellClick: (persona: Persona, index: number) => void;
+    onCellHover: (persona: Persona, index: number) => void;
+    onCellLeave: () => void;
+    onActionClick: (persona: Persona) => void;
+    onBack: () => void;
+    onScratch: () => void;
+    showKeyboardNav: boolean;
+  }
+
+  function renderPersonaSelect(config: PersonaSelectConfig) {
+    const {
+      title, subtitle, actionLabel, backLabel, scratchLabel, kbHint,
+      hoveredPersona: hovered, activeGridIndex, isLoading: busy,
+      onCellClick, onCellHover, onCellLeave, onActionClick,
+      onBack, onScratch, showKeyboardNav,
+    } = config;
+
+    const displayPersona = hovered ?? PERSONAS[activeGridIndex];
+    const accentVar = displayPersona ? colorToCssVar(displayPersona.color) : "var(--arcade-yellow)";
+
+    return (
+      <div className="w-full max-w-5xl space-y-5 px-2 sm:px-0">
+        {/* Screen Title */}
+        <div className="text-center space-y-2">
+          <h2 className="sf2-screen-title arcade-text">{title}</h2>
+          <p className="pixel-font text-white/25 text-[6px] sm:text-[7px] tracking-wider">
+            {subtitle}
+          </p>
+        </div>
+
+        {/* Main Layout: Grid + Preview Panel */}
+        <div className="sf2-select-layout">
+          {/* 3x3 CHARACTER GRID */}
+          <div className="sf2-grid-frame">
+            <div className="grid grid-cols-3">
+              {PERSONAS.map((persona, index) => {
+                const isHovered = hovered?.id === persona.id;
+                const isKbFocused = showKeyboardNav && activeGridIndex === index;
+                const isActive = isHovered || isKbFocused;
+                const cellColor = colorToCssVar(persona.color);
+                return (
+                  <button
+                    key={persona.id}
+                    onClick={() => onCellClick(persona, index)}
+                    onMouseEnter={() => onCellHover(persona, index)}
+                    onMouseLeave={onCellLeave}
+                    disabled={busy}
+                    className="sf2-cell"
+                    data-active={isActive}
+                    style={{
+                      "--sf2-cell-color": cellColor,
+                    } as React.CSSProperties}
+                  >
+                    {isActive && (
+                      <>
+                        <span className="sf2-cursor sf2-cursor-tl" style={{ borderColor: cellColor }} />
+                        <span className="sf2-cursor sf2-cursor-tr" style={{ borderColor: cellColor }} />
+                        <span className="sf2-cursor sf2-cursor-bl" style={{ borderColor: cellColor }} />
+                        <span className="sf2-cursor sf2-cursor-br" style={{ borderColor: cellColor }} />
+                      </>
+                    )}
+
+                    {/* Sprite/icon area — takes up top portion of cell */}
+                    <span className="sf2-cell-portrait">
+                      <PersonaIcon persona={persona} size="cell" />
+                    </span>
+
+                    {/* Name strip — dedicated bottom slot, never overlaps sprite */}
+                    <span className="sf2-cell-name">{persona.name}</span>
+
+                    {/* Bottom accent bar */}
+                    <span className="sf2-cell-bar" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* PREVIEW PANEL */}
+          {(() => {
+            if (busy) return (
+              <div
+                className="sf2-preview-panel"
+                style={{ "--sf2-preview-color": "var(--arcade-green)" } as React.CSSProperties}
+              >
+                <div className="sf2-preview-accent" />
+                <div className="sf2-preview-empty">
+                  <div className="w-8 h-8 border-2 border-arcade-green border-t-transparent rounded-full animate-spin" />
+                  <p className="pixel-font text-arcade-green text-[9px] blink tracking-wider mt-3">
+                    CONFIGURING AGENT...
+                  </p>
+                </div>
+              </div>
+            );
+
+            if (!displayPersona) return (
+              <div
+                className="sf2-preview-panel"
+                style={{ "--sf2-preview-color": "var(--arcade-yellow)" } as React.CSSProperties}
+              >
+                <div className="sf2-preview-accent" />
+                <div className="sf2-preview-empty">
+                  <p className="pixel-font text-white/25 text-[8px] blink tracking-wider">
+                    HOVER TO PREVIEW
+                  </p>
+                </div>
+              </div>
+            );
+
+            return (
+              <div
+                className="sf2-preview-panel"
+                style={{ "--sf2-preview-color": accentVar } as React.CSSProperties}
+              >
+                <div className="sf2-preview-accent" />
+                <div className="sf2-preview-body">
+                  {/* Large icon */}
+                  <div className="flex justify-center">
+                    <PersonaIcon persona={displayPersona} size="preview" />
+                  </div>
+
+                  {/* Name */}
+                  <p className="sf2-preview-name">{displayPersona.name}</p>
+
+                  {/* Tagline */}
+                  <p className="sf2-preview-tagline">{displayPersona.tagline}</p>
+
+                  {/* Stats */}
+                  <div className="space-y-1.5">
+                    <div className="sf2-preview-stat">
+                      <span className="sf2-preview-stat-label">MODEL</span>
+                      <span className="sf2-preview-stat-value">
+                        {PROVIDERS.find((p) => p.value === displayPersona.recommendedModel)?.shortLabel ?? "CLAUDE"}
+                      </span>
+                    </div>
+                    <div className="sf2-preview-stat">
+                      <span className="sf2-preview-stat-label">SKILLS</span>
+                      <span className="sf2-preview-stat-value">
+                        {displayPersona.skills.length}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Skill tags — max 4 shown */}
+                  {displayPersona.skills.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {displayPersona.skills.slice(0, 4).map((skill) => (
+                        <span
+                          key={skill.name}
+                          className="pixel-font text-[9px] px-2.5 py-1 border border-white/20 bg-white/10 text-white/80"
+                          title={skill.description}
+                        >
+                          {skill.name}
+                        </span>
+                      ))}
+                      {displayPersona.skills.length > 4 && (
+                        <span className="pixel-font text-[9px] px-2.5 py-1 text-white/40">
+                          +{displayPersona.skills.length - 4} MORE
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Action Button */}
+                  <button
+                    onClick={() => onActionClick(displayPersona)}
+                    onMouseEnter={() => ArcadeSounds.buttonHover()}
+                    disabled={busy}
+                    className="sf2-select-btn"
+                    style={{
+                      "--sf2-preview-color": accentVar,
+                    } as React.CSSProperties}
+                  >
+                    {actionLabel}
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* Bottom Actions + Hints */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 max-w-5xl mx-auto mt-2">
+          <div className="flex gap-6">
+            <button
+              onClick={onBack}
+              onMouseEnter={() => ArcadeSounds.buttonHover()}
+              disabled={busy}
+              className="arcade-btn text-arcade-pink"
+              style={{ borderColor: "var(--arcade-pink)" }}
+            >
+              {backLabel}
+            </button>
+            <button
+              onClick={onScratch}
+              onMouseEnter={() => ArcadeSounds.buttonHover()}
+              disabled={busy}
+              className="arcade-btn text-white/50 hover:text-white/70"
+              style={{ borderColor: "rgba(255,255,255,0.2)" }}
+              title={scratchLabel === "SKIP TEMPLATE" ? "Deploy a blank OpenClaw instance with no pre-loaded agents" : "Add a blank agent with no pre-loaded skills"}
+            >
+              {scratchLabel}
+            </button>
+          </div>
+          <p className="sf2-kb-hint hidden sm:block">{kbHint}</p>
+        </div>
+      </div>
+    );
+  }
+
   // ─── Render ───────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* ═══════ MUTE TOGGLE ═══════ */}
+      {/* ═══════ TOP-RIGHT UTILITY LINKS ═══════ */}
+      <a
+        href="https://discord.gg/YV9pGMpFQJ"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="discord-link"
+        title="Join our Discord"
+        aria-label="Join our Discord"
+      >
+        <svg
+          width="18"
+          height="14"
+          viewBox="0 0 127.14 96.36"
+          fill="currentColor"
+          xmlns="http://www.w3.org/2000/svg"
+          aria-hidden="true"
+        >
+          <path d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.71,56.6.54,80.21h0A105.73,105.73,0,0,0,32.71,96.36,77.7,77.7,0,0,0,39.6,85.25a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.66,2a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.1A105.25,105.25,0,0,0,126.6,80.22h0C129.24,52.84,122.09,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,60,31,53s5-12.74,11.43-12.74S54,46,53.89,53,48.84,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.25,60,73.25,53s5-12.74,11.44-12.74S96.23,46,96.12,53,91.08,65.69,84.69,65.69Z" />
+        </svg>
+      </a>
       <button
         onClick={handleToggleMute}
         className="sound-mute-btn"
@@ -645,8 +1220,8 @@ export default function Home() {
         <span className="sound-mute-icon">{soundMuted ? "\uD83D\uDD07" : "\uD83D\uDD0A"}</span>
       </button>
 
-      {/* ═══════ TOP BAR (when logged in) ═══════ */}
-      {isAuthenticated && (
+      {/* ═══════ TOP BAR (when logged in with real auth) ═══════ */}
+      {isAuthenticated && authUser.email && (
         <header className="border-b border-white/10 px-4 py-3">
           <div className="max-w-4xl mx-auto flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -657,9 +1232,11 @@ export default function Home() {
                   className="w-6 h-6 rounded-full border border-white/20"
                 />
               )}
-              <span className="pixel-font text-[7px] sm:text-[8px] text-white/50 tracking-wider">
-                {authUser.email}
-              </span>
+              {authUser.email && (
+                <span className="pixel-font text-[7px] sm:text-[8px] text-white/50 tracking-wider">
+                  {authUser.email}
+                </span>
+              )}
             </div>
             <button
               onClick={handleSignOut}
@@ -700,31 +1277,95 @@ export default function Home() {
               >
                 CLAWGENT
               </h1>
-              <p className="pixel-font text-arcade-yellow text-[10px] sm:text-xs tracking-widest max-w-sm mx-auto leading-relaxed">
-                YOUR OWN OPENCLAW INSTANCE. USEFUL FROM DAY 1.
+
+              {/* Nex.ai Logo — directly under title */}
+              <a
+                href="https://nex.ai?utm_source=clawgent.ai&utm_medium=referral"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center gap-2 opacity-40 hover:opacity-60 transition-opacity"
+                aria-label="Built by Nex.ai"
+              >
+                <span className="pixel-font text-[7px] text-white tracking-wider">by</span>
+                <svg width="90" height="21" viewBox="0 0 95 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M11.4968 9.1124C10.2339 7.84948 9.98851 5.898 9.48601 4.18411C9.26753 3.43896 8.86469 2.73685 8.27738 2.14953C6.40286 0.275011 3.35898 0.279701 1.47868 2.16C-0.401626 4.0403 -0.406316 7.08419 1.4682 8.9587C2.05551 9.54601 2.75761 9.94885 3.50275 10.1673C5.21664 10.6698 7.16813 10.9152 8.43106 12.1782C9.69399 13.4411 9.93939 15.3926 10.4419 17.1065C10.6604 17.8516 11.0632 18.5537 11.6505 19.141C13.525 21.0155 16.5689 21.0109 18.4492 19.1306C20.3295 17.2503 20.3342 14.2064 18.4597 12.3319C17.8724 11.7445 17.1703 11.3417 16.4251 11.1232C14.7112 10.6207 12.7597 10.3753 11.4968 9.1124Z" fill="white"/>
+                  <path d="M7.25926 17.0471C7.25926 19.0517 5.63422 20.6768 3.62963 20.6768C1.62504 20.6768 0 19.0517 0 17.0471C0 15.0425 1.62504 13.4175 3.62963 13.4175C5.63422 13.4175 7.25926 15.0425 7.25926 17.0471Z" fill="white"/>
+                  <path d="M20 4.30639C20 6.31098 18.375 7.93602 16.3704 7.93602C14.3658 7.93602 12.7407 6.31098 12.7407 4.30639C12.7407 2.3018 14.3658 0.676758 16.3704 0.676758C18.375 0.676758 20 2.3018 20 4.30639Z" fill="white"/>
+                  <path d="M29.5211 7.15435V20.5967H26.25V1.92676H29.7915L37.4421 14.9957V1.92676H40.7132V20.5967H37.415L29.5211 7.15435Z" fill="white"/>
+                  <path d="M55.8786 14.5423H45.5787C45.9572 16.356 47.444 17.6896 49.2012 17.6896C50.5259 17.6896 51.6884 16.9428 52.3372 15.7959H55.6083C54.7432 18.6231 52.202 20.6768 49.2012 20.6768C45.4705 20.6768 42.4698 17.5029 42.4698 13.6088C42.4698 9.71481 45.4705 6.54091 49.2012 6.54091C52.202 6.54091 54.7432 8.59461 55.6083 11.4218C55.8246 12.1152 55.9327 12.8354 55.9327 13.6088C55.9327 13.9289 55.9327 14.2223 55.8786 14.5423ZM46.0653 11.4218H52.3372C51.6884 10.2749 50.5259 9.52811 49.2012 9.52811C47.8766 9.52811 46.7141 10.2749 46.0653 11.4218Z" fill="white"/>
+                  <path d="M68.75 6.32754L63.965 13.4755L68.75 20.5967H64.9652L62.0726 16.276L59.1529 20.5967H55.3952L60.1802 13.4755L55.3952 6.32754H59.1529L62.0726 10.6483L64.9652 6.32754H68.75Z" fill="white"/>
+                  <circle cx="72" cy="18.6768" r="2" fill="white"/>
+                  <path d="M94.3129 3.422C93.9263 3.80867 93.4623 4.002 92.9209 4.002C92.3796 4.002 91.9059 3.80867 91.4999 3.422C91.1133 3.016 90.9199 2.54233 90.9199 2.001C90.9199 1.45967 91.1133 0.995667 91.4999 0.609001C91.8866 0.203 92.3603 0 92.9209 0C93.4816 0 93.9553 0.203 94.3419 0.609001C94.7286 0.995667 94.9219 1.45967 94.9219 2.001C94.9219 2.54233 94.7189 3.016 94.3129 3.422ZM91.3549 20.677V6.177H94.4869V20.677H91.3549Z" fill="white"/>
+                  <path d="M85.5131 6.17681H88.7697V20.6768H85.5131V18.5888C84.4699 20.2321 82.9736 21.0538 81.024 21.0538C79.2626 21.0538 77.7577 20.3191 76.5093 18.8498C75.2609 17.3611 74.6367 15.5535 74.6367 13.4268C74.6367 11.2808 75.2609 9.47314 76.5093 8.0038C77.7577 6.53447 79.2626 5.7998 81.024 5.7998C82.9736 5.7998 84.4699 6.6118 85.5131 8.2358V6.17681ZM78.5614 16.7618C79.331 17.6318 80.2972 18.0668 81.4601 18.0668C82.623 18.0668 83.5892 17.6318 84.3587 16.7618C85.1283 15.8725 85.5131 14.7608 85.5131 13.4268C85.5131 12.0928 85.1283 10.9908 84.3587 10.1208C83.5892 9.23147 82.623 8.7868 81.4601 8.7868C80.2972 8.7868 79.331 9.23147 78.5614 10.1208C77.7919 10.9908 77.4071 12.0928 77.4071 13.4268C77.4071 14.7608 77.7919 15.8725 78.5614 16.7618Z" fill="white"/>
+                </svg>
+              </a>
+
+              <p className="pixel-font text-arcade-yellow text-[10px] sm:text-xs tracking-widest mx-auto leading-relaxed">
+                DEPLOY OPENCLAW UNDER A MINUTE.<br />GET IT GOING ON DAY-1 WITH PRE-BUILT AGENTS
               </p>
               <p className="pixel-font text-white/25 text-[7px] tracking-wider max-w-xs mx-auto">
                 PRE-LOADED AGENT TEMPLATES. REAL SKILLS. ONE CLICK.
               </p>
             </div>
 
-            {/* AUTH GATE: Not logged in */}
-            {!isAuthenticated && (
-              <>
+            {/* ─── SNES-STYLE START MENU (unauthenticated or no instance) ─── */}
+            {(!isAuthenticated || !hasInstance) && !showAddAgentSelect && (
+              <div className="w-full max-w-md space-y-3">
+                {/* Option 1: Deploy */}
                 <button
-                  onClick={handleSignIn}
-                  onMouseEnter={() => ArcadeSounds.buttonHover()}
+                  onClick={() => { setStartMenuIndex(0); handleDeployOption(); }}
+                  onMouseEnter={() => { setStartMenuIndex(0); setSnarkyMessage(null); ArcadeSounds.cursorMove(); }}
+                  className={`start-menu-option ${nopeShake && startMenuIndex === 0 ? "nope-shake" : ""}`}
+                  data-active={startMenuIndex === 0}
                   disabled={signingIn}
-                  className="pixel-font bg-white text-black text-sm sm:text-base px-10 py-4 border-4 border-white cursor-pointer transition-all duration-150 hover:scale-105 hover:shadow-[0_0_20px_rgba(255,255,255,0.5)] active:scale-95 disabled:opacity-50 disabled:cursor-wait"
                 >
-                  {/* TODO: Re-add Google OAuth as a sign-in option */}
-                  {signingIn ? "HOLD TIGHT..." : "SIGN IN"}
+                  {startMenuIndex === 0 ? (
+                    <span className="start-menu-arrow" aria-hidden="true">{"\u25B6"}</span>
+                  ) : (
+                    <span className="start-menu-arrow-spacer" aria-hidden="true" />
+                  )}
+                  <span className="pixel-font text-[10px] sm:text-xs tracking-wider">
+                    {signingIn ? "HOLD TIGHT..." : "DEPLOY OPENCLAW IN A MIN"}
+                  </span>
                 </button>
 
-                <p className="pixel-font text-white/30 text-[8px] tracking-wider max-w-xs">
-                  SIGN IN TO DEPLOY YOUR OWN OPENCLAW INSTANCE
-                </p>
-              </>
+                {/* Option 2: Stay Irrelevant */}
+                <button
+                  onClick={() => { setStartMenuIndex(1); handleStayIrrelevant(); }}
+                  onMouseEnter={() => { setStartMenuIndex(1); setSnarkyMessage(null); ArcadeSounds.cursorMove(); }}
+                  className={`start-menu-option ${nopeShake && startMenuIndex === 1 ? "nope-shake" : ""}`}
+                  data-active={startMenuIndex === 1}
+                  data-variant="danger"
+                >
+                  {startMenuIndex === 1 ? (
+                    <span className="start-menu-arrow" aria-hidden="true">{"\u25B6"}</span>
+                  ) : (
+                    <span className="start-menu-arrow-spacer" aria-hidden="true" />
+                  )}
+                  <span className="pixel-font text-[10px] sm:text-xs tracking-wider">
+                    STAY IRRELEVANT
+                  </span>
+                </button>
+
+                {/* Snarky message area */}
+                <div className="h-10 flex items-center justify-center">
+                  {snarkyMessage ? (
+                    <p className="pixel-font text-arcade-pink text-[8px] sm:text-[9px] tracking-wider snarky-message">
+                      {snarkyMessage}
+                    </p>
+                  ) : (
+                    <p className="pixel-font text-white/15 text-[7px] tracking-wider">
+                      USE ARROW KEYS + ENTER, OR CLICK
+                    </p>
+                  )}
+                </div>
+
+                {systemStatus && !systemStatus.dockerAvailable && (
+                  <p className="pixel-font text-arcade-red text-[8px]">
+                    DOCKER IS TAKING A PERSONAL DAY
+                  </p>
+                )}
+              </div>
             )}
 
             {/* AUTH GATE: Logged in + has running instance */}
@@ -794,18 +1435,20 @@ export default function Home() {
                             }}
                           >
                             <div className="flex items-start gap-3 p-3">
-                              <span className="text-2xl sm:text-3xl shrink-0">{agent.emoji}</span>
+                              {agentPersona?.sprite ? (
+                                <img
+                                  src={agentPersona.sprite}
+                                  alt={agent.name}
+                                  className="w-10 h-10 object-cover rounded shrink-0"
+                                />
+                              ) : (
+                                <span className="text-2xl sm:text-3xl shrink-0">{agent.emoji}</span>
+                              )}
                               <div className="flex-1 min-w-0">
                                 <p
                                   className={`pixel-font text-[8px] sm:text-[9px] ${colorToTw(accentColor, "text")}`}
                                 >
                                   {agent.name}
-                                </p>
-                                <p className="pixel-font text-[6px] text-white/30 mt-0.5">
-                                  {agent.persona ? PERSONAS.find((p) => p.id === agent.persona)?.name ?? agent.persona : "CUSTOM"}
-                                  {agent.skillCount > 0 && (
-                                    <span className="ml-2 text-white/20">{agent.skillCount} SKILLS</span>
-                                  )}
                                 </p>
                               </div>
                               {/* Action buttons */}
@@ -859,6 +1502,270 @@ export default function Home() {
                   {addingAgent ? "CONFIGURING AGENT..." : "ADD AGENT"}
                 </button>
 
+                {/* Power Ups Section */}
+                {SHOW_INTEGRATIONS && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="pixel-font text-[8px] text-white/40 tracking-wider">
+                      POWER UPS
+                    </p>
+                    {channelsLoading && (
+                      <div className="w-3 h-3 border border-white/30 border-t-transparent rounded-full animate-spin" />
+                    )}
+                  </div>
+
+                  {/* Success/Error feedback */}
+                  {channelSuccess && (
+                    <div className="arcade-panel px-3 py-2 border-arcade-green/40 bg-arcade-green/10 text-center">
+                      <p className="pixel-font text-[7px] text-arcade-green tracking-wider">{channelSuccess}</p>
+                    </div>
+                  )}
+                  {channelError && (
+                    <div className="arcade-panel px-3 py-2 border-arcade-red/40 bg-arcade-red/10 text-center">
+                      <p className="pixel-font text-[7px] text-arcade-red tracking-wider">{channelError}</p>
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    {([
+                      { key: "slack" as const, label: "SLACK", icon: "#", color: "var(--arcade-green)", iconTextColor: "#000" },
+                      { key: "telegram" as const, label: "TELEGRAM", icon: "\u2708", color: "var(--arcade-blue)", iconTextColor: "#000" },
+                      { key: "discord" as const, label: "DISCORD", icon: "\uD83C\uDFAE", color: "var(--arcade-purple)", iconTextColor: "#fff" },
+                    ]).map((ch) => {
+                      const liveInfo = liveChannels.find((c) => c.type === ch.key);
+                      const isConnected = liveInfo?.enabled ?? false;
+                      const isExpanded = expandedChannel === ch.key;
+                      const isActionLoading = channelActionLoading === ch.key;
+
+                      return (
+                        <div key={ch.key} className="arcade-panel" style={isConnected ? { borderColor: ch.color } : undefined}>
+                          {/* Channel row header */}
+                          <button
+                            onClick={() => {
+                              ArcadeSounds.buttonClick();
+                              setExpandedChannel(isExpanded ? null : ch.key);
+                              setChannelError(null);
+                            }}
+                            className="flex items-center gap-2 px-3 py-2.5 w-full cursor-pointer"
+                          >
+                            <span
+                              className="flex items-center justify-center w-5 h-5 text-[8px] font-bold pixel-font shrink-0"
+                              style={{ background: ch.color, color: ch.iconTextColor }}
+                            >
+                              {ch.icon}
+                            </span>
+                            <span className="pixel-font text-[7px] text-white/60">{ch.label}</span>
+                            {isActionLoading ? (
+                              <span className="ml-auto w-3 h-3 border border-white/40 border-t-transparent rounded-full animate-spin shrink-0" />
+                            ) : (
+                              <span
+                                className="ml-auto w-2 h-2 shrink-0"
+                                style={{ background: isConnected ? ch.color : "rgba(255,255,255,0.15)" }}
+                              />
+                            )}
+                            {isConnected && (
+                              <span className="pixel-font text-[6px] tracking-wider shrink-0" style={{ color: ch.color }}>
+                                {liveInfo?.status === "error" ? "ERROR" : "ON"}
+                              </span>
+                            )}
+                          </button>
+
+                          {/* Expanded panel */}
+                          {isExpanded && (
+                            <div className="px-3 pb-3 space-y-2 border-t border-white/5 pt-2">
+                              {isConnected ? (
+                                <>
+                                  <p className="pixel-font text-[6px] text-white/30 tracking-wider">
+                                    {liveInfo?.status === "error"
+                                      ? `ERROR: ${liveInfo.error ?? "UNKNOWN"}`
+                                      : "CHANNEL CONNECTED AND ACTIVE"}
+                                  </p>
+                                  <button
+                                    onClick={() => {
+                                      ArcadeSounds.buttonClick();
+                                      disconnectChannel(userInstance!.id, ch.key);
+                                    }}
+                                    disabled={isActionLoading}
+                                    className="pixel-font text-[7px] text-arcade-red border border-arcade-red/40 px-3 py-1.5 hover:bg-arcade-red/10 transition-all cursor-pointer disabled:opacity-40"
+                                  >
+                                    {isActionLoading ? "DISCONNECTING..." : "DISCONNECT"}
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  {/* Credential inputs */}
+                                  {ch.key === "slack" && (
+                                    <div className="space-y-2">
+                                      <a
+                                        href="https://docs.openclaw.ai/channels/slack"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="pixel-font text-[7px] text-white/30 hover:text-white/60 transition-colors inline-block mb-1"
+                                      >
+                                        Setup guide →
+                                      </a>
+                                      <div>
+                                        <label className="pixel-font text-[6px] text-white/30 tracking-wider">APP TOKEN</label>
+                                        <input
+                                          type="password"
+                                          value={channelInputs.slack.appToken}
+                                          onChange={(e) =>
+                                            setChannelInputs((prev) => ({
+                                              ...prev,
+                                              slack: { ...prev.slack, appToken: e.target.value },
+                                            }))
+                                          }
+                                          placeholder="xapp-..."
+                                          className="arcade-input w-full py-1.5 px-2 text-xs"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="pixel-font text-[6px] text-white/30 tracking-wider">BOT TOKEN</label>
+                                        <input
+                                          type="password"
+                                          value={channelInputs.slack.botToken}
+                                          onChange={(e) =>
+                                            setChannelInputs((prev) => ({
+                                              ...prev,
+                                              slack: { ...prev.slack, botToken: e.target.value },
+                                            }))
+                                          }
+                                          placeholder="xoxb-..."
+                                          className="arcade-input w-full py-1.5 px-2 text-xs"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="pixel-font text-[6px] text-white/30 tracking-wider">USER TOKEN (OPTIONAL)</label>
+                                        <input
+                                          type="password"
+                                          value={channelInputs.slack.userToken ?? ""}
+                                          onChange={(e) =>
+                                            setChannelInputs((prev) => ({
+                                              ...prev,
+                                              slack: { ...prev.slack, userToken: e.target.value },
+                                            }))
+                                          }
+                                          placeholder="xoxp-..."
+                                          className="arcade-input w-full py-1.5 px-2 text-xs"
+                                        />
+                                      </div>
+                                      <button
+                                        onClick={() => {
+                                          ArcadeSounds.buttonClick();
+                                          connectChannel(userInstance!.id, "slack", channelInputs.slack);
+                                        }}
+                                        disabled={isActionLoading || !channelInputs.slack.appToken.trim() || !channelInputs.slack.botToken.trim()}
+                                        className="pixel-font text-[7px] px-3 py-1.5 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                                        style={{
+                                          color: ch.color,
+                                          borderWidth: "1px",
+                                          borderStyle: "solid",
+                                          borderColor: ch.color,
+                                        }}
+                                      >
+                                        {isActionLoading ? "CONNECTING..." : "CONNECT SLACK"}
+                                      </button>
+                                    </div>
+                                  )}
+
+                                  {ch.key === "telegram" && (
+                                    <div className="space-y-2">
+                                      <a
+                                        href="https://docs.openclaw.ai/channels/telegram"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="pixel-font text-[7px] text-white/30 hover:text-white/60 transition-colors inline-block mb-1"
+                                      >
+                                        Setup guide →
+                                      </a>
+                                      <div>
+                                        <label className="pixel-font text-[6px] text-white/30 tracking-wider">BOT TOKEN</label>
+                                        <input
+                                          type="password"
+                                          value={channelInputs.telegram.botToken}
+                                          onChange={(e) =>
+                                            setChannelInputs((prev) => ({
+                                              ...prev,
+                                              telegram: { botToken: e.target.value },
+                                            }))
+                                          }
+                                          placeholder="123456:ABC-..."
+                                          className="arcade-input w-full py-1.5 px-2 text-xs"
+                                        />
+                                      </div>
+                                      <button
+                                        onClick={() => {
+                                          ArcadeSounds.buttonClick();
+                                          connectChannel(userInstance!.id, "telegram", channelInputs.telegram);
+                                        }}
+                                        disabled={isActionLoading || !channelInputs.telegram.botToken.trim()}
+                                        className="pixel-font text-[7px] px-3 py-1.5 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                                        style={{
+                                          color: ch.color,
+                                          borderWidth: "1px",
+                                          borderStyle: "solid",
+                                          borderColor: ch.color,
+                                        }}
+                                      >
+                                        {isActionLoading ? "CONNECTING..." : "CONNECT TELEGRAM"}
+                                      </button>
+                                    </div>
+                                  )}
+
+                                  {ch.key === "discord" && (
+                                    <div className="space-y-2">
+                                      <a
+                                        href="https://docs.openclaw.ai/channels/discord"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="pixel-font text-[7px] text-white/30 hover:text-white/60 transition-colors inline-block mb-1"
+                                      >
+                                        Setup guide →
+                                      </a>
+                                      <div>
+                                        <label className="pixel-font text-[6px] text-white/30 tracking-wider">BOT TOKEN</label>
+                                        <input
+                                          type="password"
+                                          value={channelInputs.discord.token}
+                                          onChange={(e) =>
+                                            setChannelInputs((prev) => ({
+                                              ...prev,
+                                              discord: { token: e.target.value },
+                                            }))
+                                          }
+                                          placeholder="MTk2..."
+                                          className="arcade-input w-full py-1.5 px-2 text-xs"
+                                        />
+                                      </div>
+                                      <button
+                                        onClick={() => {
+                                          ArcadeSounds.buttonClick();
+                                          connectChannel(userInstance!.id, "discord", channelInputs.discord);
+                                        }}
+                                        disabled={isActionLoading || !channelInputs.discord.token.trim()}
+                                        className="pixel-font text-[7px] px-3 py-1.5 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                                        style={{
+                                          color: ch.color,
+                                          borderWidth: "1px",
+                                          borderStyle: "solid",
+                                          borderColor: ch.color,
+                                        }}
+                                      >
+                                        {isActionLoading ? "CONNECTING..." : "CONNECT DISCORD"}
+                                      </button>
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                )}
+
                 {/* Instance Actions */}
                 <div className="flex items-center justify-between pt-2 border-t border-white/10">
                   {userInstance?.dashboardUrl && (
@@ -886,142 +1793,43 @@ export default function Home() {
 
             {/* ADD AGENT: Persona Selection (sub-screen within start view) */}
             {isAuthenticated && hasInstance && showAddAgentSelect && (
-              <div className="w-full max-w-4xl space-y-6">
-                <h2 className="pixel-font text-arcade-yellow arcade-text text-center text-sm sm:text-lg">
-                  ADD AGENT TO INSTANCE
-                </h2>
-                <p className="pixel-font text-white/30 text-[7px] text-center tracking-wider -mt-4">
-                  PICK A TEMPLATE. THE AGENT WILL USE YOUR INSTANCE&apos;S EXISTING API KEY.
-                </p>
-
-                {/* Reuse the 3x3 persona grid */}
-                <div className="sf2-grid-wrapper">
-                  <div className="grid grid-cols-3 gap-0 border-4 border-arcade-yellow bg-black/80 max-w-2xl mx-auto">
-                    {PERSONAS.map((persona) => {
-                      const isHovered = addAgentHovered?.id === persona.id;
-                      return (
-                        <button
-                          key={persona.id}
-                          onClick={() => {
-                            ArcadeSounds.select();
-                            addAgentToInstance(userInstance!.id, persona.id);
-                          }}
-                          onMouseEnter={() => { playCursorMove(); setAddAgentHovered(persona); }}
-                          onMouseLeave={() => setAddAgentHovered(null)}
-                          disabled={addingAgent}
-                          className="relative aspect-square flex flex-col items-center justify-center cursor-pointer transition-colors duration-100 disabled:opacity-40"
-                          style={{
-                            border: isHovered
-                              ? `3px solid ${colorToCssVar(persona.color)}`
-                              : "3px solid #333",
-                            background: isHovered
-                              ? "rgba(255,255,255,0.06)"
-                              : "transparent",
-                            boxShadow: isHovered
-                              ? `inset 0 0 20px ${colorToCssVar(persona.color)}33, 0 0 8px ${colorToCssVar(persona.color)}66`
-                              : "none",
-                          }}
-                        >
-                          {isHovered && (
-                            <>
-                              <span className="sf2-cursor sf2-cursor-tl" style={{ borderColor: colorToCssVar(persona.color) }} />
-                              <span className="sf2-cursor sf2-cursor-tr" style={{ borderColor: colorToCssVar(persona.color) }} />
-                              <span className="sf2-cursor sf2-cursor-bl" style={{ borderColor: colorToCssVar(persona.color) }} />
-                              <span className="sf2-cursor sf2-cursor-br" style={{ borderColor: colorToCssVar(persona.color) }} />
-                            </>
-                          )}
-                          <span className="text-3xl sm:text-4xl md:text-5xl mb-1">{persona.icon}</span>
-                          <span
-                            className={`pixel-font text-[6px] sm:text-[7px] ${isHovered ? colorToTw(persona.color, "text") : "text-white/40"}`}
-                          >
-                            {persona.name}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Hovered persona preview */}
-                {addAgentHovered && (
-                  <div className="text-center space-y-1">
-                    <p className={`pixel-font text-[10px] ${colorToTw(addAgentHovered.color, "text")}`}>
-                      {addAgentHovered.name}
-                    </p>
-                    <p className="text-white/50 text-xs">{addAgentHovered.tagline}</p>
-                    <p className="pixel-font text-white/20 text-[7px]">
-                      {addAgentHovered.skills.length} SKILLS
-                    </p>
-                  </div>
-                )}
-
-                {!addAgentHovered && !addingAgent && (
-                  <p className="pixel-font text-white/30 text-[9px] text-center blink">
-                    HOVER TO PREVIEW. CLICK TO ADD.
-                  </p>
-                )}
-
-                {addingAgent && (
-                  <div className="flex flex-col items-center gap-3 py-4">
-                    <div className="w-8 h-8 border-2 border-arcade-green border-t-transparent rounded-full animate-spin" />
-                    <p className="pixel-font text-arcade-green text-[9px] blink tracking-wider">
-                      CONFIGURING AGENT...
-                    </p>
-                  </div>
-                )}
-
-                {/* Actions */}
-                <div className="flex justify-center gap-3">
-                  <button
-                    onClick={() => {
-                      ArcadeSounds.back();
-                      ArcadeSounds.screenTransition();
-                      setShowAddAgentSelect(false);
-                      setAddAgentHovered(null);
-                    }}
-                    onMouseEnter={() => ArcadeSounds.buttonHover()}
-                    disabled={addingAgent}
-                    className="arcade-btn text-arcade-pink"
-                    style={{ borderColor: "var(--arcade-pink)" }}
-                  >
-                    BACK
-                  </button>
-                  <button
-                    onClick={() => {
-                      ArcadeSounds.select();
-                      addAgentToInstance(userInstance!.id, null);
-                    }}
-                    onMouseEnter={() => ArcadeSounds.buttonHover()}
-                    disabled={addingAgent}
-                    className="arcade-btn text-white/60 hover:text-white/80"
-                    style={{ borderColor: "rgba(255,255,255,0.3)" }}
-                    title="Add a blank agent with no pre-loaded skills"
-                  >
-                    START FROM SCRATCH
-                  </button>
-                </div>
-              </div>
+              renderPersonaSelect({
+                title: "ADD AGENT TO INSTANCE",
+                subtitle: "PICK A TEMPLATE. THE AGENT WILL USE YOUR INSTANCE'S EXISTING API KEY.",
+                actionLabel: "ADD THIS AGENT",
+                backLabel: "BACK",
+                scratchLabel: "START FROM SCRATCH",
+                kbHint: "HOVER TO PREVIEW / CLICK TO ADD",
+                hoveredPersona: addAgentHovered,
+                activeGridIndex: 0,
+                isLoading: addingAgent,
+                onCellClick: (persona) => {
+                  ArcadeSounds.select();
+                  addAgentToInstance(userInstance!.id, persona.id);
+                },
+                onCellHover: (persona) => {
+                  playCursorMove();
+                  setAddAgentHovered(persona);
+                },
+                onCellLeave: () => setAddAgentHovered(null),
+                onActionClick: (persona) => {
+                  ArcadeSounds.select();
+                  addAgentToInstance(userInstance!.id, persona.id);
+                },
+                onBack: () => {
+                  ArcadeSounds.back();
+                  ArcadeSounds.screenTransition();
+                  setShowAddAgentSelect(false);
+                  setAddAgentHovered(null);
+                },
+                onScratch: () => {
+                  ArcadeSounds.select();
+                  addAgentToInstance(userInstance!.id, null);
+                },
+                showKeyboardNav: false,
+              })
             )}
 
-            {/* AUTH GATE: Logged in + no instance */}
-            {isAuthenticated && !hasInstance && (
-              <>
-                <button
-                  onClick={() => { ArcadeSounds.buttonClick(); ArcadeSounds.screenTransition(); setScreen("select"); }}
-                  onMouseEnter={() => ArcadeSounds.buttonHover()}
-                  disabled={!systemStatus?.dockerAvailable}
-                  className="pixel-font bg-white text-black text-sm sm:text-base px-10 py-4 border-4 border-white cursor-pointer transition-all duration-150 hover:scale-105 hover:shadow-[0_0_20px_rgba(255,255,255,0.5)] active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  DEPLOY OPENCLAW
-                </button>
-
-                {systemStatus && !systemStatus.dockerAvailable && (
-                  <p className="pixel-font text-arcade-red text-[8px]">
-                    DOCKER IS TAKING A PERSONAL DAY
-                  </p>
-                )}
-              </>
-            )}
 
             {/* Agent count */}
             {systemStatus && systemStatus.runningInstances > 0 && (
@@ -1036,225 +1844,29 @@ export default function Home() {
 
         {/* ─── SCREEN 2: CHARACTER SELECT ─── */}
         {!isLoading && screen === "select" && (
-          <div className="w-full max-w-4xl space-y-6">
-            {/* Header */}
-            <h2 className="pixel-font text-arcade-yellow arcade-text text-center text-sm sm:text-lg">
-              PRE-LOAD AN AGENT TEMPLATE
-            </h2>
-            <p className="pixel-font text-white/30 text-[7px] text-center tracking-wider -mt-4">
-              PICK A TEMPLATE TO MAKE YOUR INSTANCE USEFUL FROM DAY 1. YOU CAN ADD MORE AGENTS LATER.
-            </p>
-
-            {/* SF2-Style Character Grid */}
-            <div className="sf2-grid-wrapper">
-              <div className="grid grid-cols-3 gap-0 border-4 border-arcade-yellow bg-black/80 max-w-2xl mx-auto">
-                {PERSONAS.map((persona) => {
-                  const isHovered = hoveredPersona?.id === persona.id;
-                  const isSelected = selectedPersona?.id === persona.id;
-                  const isActive = isHovered || isSelected;
-                  return (
-                    <button
-                      key={persona.id}
-                      onClick={() => handlePersonaSelect(persona)}
-                      onMouseEnter={() => { playCursorMove(); setHoveredPersona(persona); setExpandedSkill(null); }}
-                      onMouseLeave={() => setHoveredPersona(null)}
-                      className="relative aspect-square flex flex-col items-center justify-center cursor-pointer transition-colors duration-100"
-                      style={{
-                        border: isActive
-                          ? `3px solid ${colorToCssVar(persona.color)}`
-                          : "3px solid #333",
-                        background: isActive
-                          ? "rgba(255,255,255,0.06)"
-                          : "transparent",
-                        boxShadow: isActive
-                          ? `inset 0 0 20px ${colorToCssVar(persona.color)}33, 0 0 8px ${colorToCssVar(persona.color)}66`
-                          : "none",
-                      }}
-                    >
-                      {/* Selector Cursor (animated corners) */}
-                      {isActive && (
-                        <>
-                          <span className="sf2-cursor sf2-cursor-tl" style={{ borderColor: colorToCssVar(persona.color) }} />
-                          <span className="sf2-cursor sf2-cursor-tr" style={{ borderColor: colorToCssVar(persona.color) }} />
-                          <span className="sf2-cursor sf2-cursor-bl" style={{ borderColor: colorToCssVar(persona.color) }} />
-                          <span className="sf2-cursor sf2-cursor-br" style={{ borderColor: colorToCssVar(persona.color) }} />
-                        </>
-                      )}
-
-                      {/* Character Icon */}
-                      <span className="text-3xl sm:text-4xl md:text-5xl mb-1">
-                        {persona.icon}
-                      </span>
-
-                      {/* Mini Name (inside cell) */}
-                      <span
-                        className={`pixel-font text-[6px] sm:text-[7px] ${isActive ? colorToTw(persona.color, "text") : "text-white/40"}`}
-                      >
-                        {persona.name}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Nameplate (below grid, shows hovered/selected persona info + skills showcase) */}
-            {(() => {
-              const displayPersona = hoveredPersona ?? selectedPersona;
-              if (!displayPersona) return (
-                <div className="h-24 flex flex-col items-center justify-center gap-2">
-                  <p className="pixel-font text-white/30 text-[9px] blink">
-                    HOVER TO PREVIEW. CLICK TO COMMIT.
-                  </p>
-                  <p className="pixel-font text-white/15 text-[7px] tracking-wider">
-                    EACH TEMPLATE PRE-LOADS SKILLS INTO YOUR OPENCLAW INSTANCE
-                  </p>
-                </div>
-              );
-
-              const accentVar = colorToCssVar(displayPersona.color);
-
-              return (
-                <div
-                  className="border-4 max-w-2xl mx-auto"
-                  style={{
-                    borderColor: accentVar,
-                    background: "rgba(0,0,0,0.7)",
-                    boxShadow: `0 0 12px ${accentVar}44`,
-                  }}
-                >
-                  {/* Top row: icon + name + tagline */}
-                  <div className="flex items-center gap-6 p-4 pb-2">
-                    <span className="text-4xl sm:text-5xl shrink-0">{displayPersona.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <p
-                        className={`pixel-font text-xs sm:text-sm ${colorToTw(displayPersona.color, "text")} arcade-text`}
-                      >
-                        {displayPersona.name}
-                      </p>
-                      <p className="text-white/60 text-xs mt-1">{displayPersona.tagline}</p>
-                    </div>
-                  </div>
-
-                  {/* Skills section header */}
-                  <div className="px-4 pt-1 pb-1">
-                    <p
-                      className="pixel-font text-[6px] tracking-[0.2em]"
-                      style={{ color: `${accentVar}` }}
-                    >
-                      EQUIPPED SKILLS
-                    </p>
-                  </div>
-
-                  {/* Skill tags */}
-                  <div className="flex flex-wrap gap-2 px-4 pb-2">
-                    {displayPersona.skills.map((skill) => {
-                      const isExpanded = expandedSkill === skill.name;
-                      return (
-                        <button
-                          key={skill.name}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setExpandedSkill(isExpanded ? null : skill.name);
-                          }}
-                          className="skill-tag pixel-font text-[6px] px-2 py-1 border cursor-pointer transition-all duration-150"
-                          style={{
-                            borderColor: isExpanded ? accentVar : `${accentVar}66`,
-                            color: accentVar,
-                            background: isExpanded ? `${accentVar}15` : "transparent",
-                            boxShadow: isExpanded ? `0 0 8px ${accentVar}33` : "none",
-                          }}
-                        >
-                          <span className="mr-1">{skill.emoji}</span>
-                          {skill.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Expanded skill detail panel */}
-                  {expandedSkill && (() => {
-                    const skill = displayPersona.skills.find((s) => s.name === expandedSkill);
-                    if (!skill) return null;
-                    return (
-                      <div
-                        className="skill-detail-panel mx-4 mb-4 p-3 border-t"
-                        style={{
-                          borderColor: `${accentVar}33`,
-                          background: `${accentVar}08`,
-                        }}
-                      >
-                        {/* Skill header in panel */}
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="text-sm">{skill.emoji}</span>
-                          <span
-                            className="pixel-font text-[8px]"
-                            style={{ color: accentVar }}
-                          >
-                            {skill.name.toUpperCase()}
-                          </span>
-                        </div>
-
-                        {/* Description */}
-                        <p className="text-white/70 text-[11px] leading-relaxed">
-                          {skill.description}
-                        </p>
-
-                        {/* Source attribution */}
-                        <div className="flex items-center gap-1.5 mt-2">
-                          <span
-                            className="pixel-font text-[5px] tracking-wider"
-                            style={{ color: `${accentVar}88` }}
-                          >
-                            SRC:
-                          </span>
-                          {skill.sourceUrl ? (
-                            <a
-                              href={skill.sourceUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="pixel-font text-[5px] tracking-wider underline underline-offset-2 transition-colors hover:brightness-125"
-                              style={{ color: `${accentVar}aa` }}
-                            >
-                              {skill.source}
-                            </a>
-                          ) : (
-                            <span
-                              className="pixel-font text-[5px] tracking-wider"
-                              style={{ color: `${accentVar}88` }}
-                            >
-                              {skill.source}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-              );
-            })()}
-
-            {/* Actions */}
-            <div className="flex justify-center gap-3">
-              <button
-                onClick={handleBackToStart}
-                onMouseEnter={() => ArcadeSounds.buttonHover()}
-                className="arcade-btn text-arcade-pink"
-                style={{ borderColor: "var(--arcade-pink)" }}
-              >
-                BACK
-              </button>
-              <button
-                onClick={handleStartFromScratch}
-                onMouseEnter={() => ArcadeSounds.buttonHover()}
-                className="arcade-btn text-white/60 hover:text-white/80"
-                style={{ borderColor: "rgba(255,255,255,0.3)" }}
-                title="Deploy a blank OpenClaw instance with no pre-loaded agents. You know what you're doing."
-              >
-                I KNOW WHAT I&apos;M DOING
-              </button>
-            </div>
-          </div>
+          renderPersonaSelect({
+            title: "CHOOSE YOUR AGENT",
+            subtitle: "EACH TEMPLATE PRE-LOADS SKILLS INTO YOUR OPENCLAW INSTANCE",
+            actionLabel: "DEPLOY WITH THIS AGENT",
+            backLabel: "BACK",
+            scratchLabel: "SKIP TEMPLATE",
+            kbHint: "ARROW KEYS TO NAVIGATE / ENTER TO SELECT / ESC TO GO BACK",
+            hoveredPersona,
+            activeGridIndex: gridIndex,
+            isLoading: false,
+            onCellClick: (persona) => handlePersonaSelect(persona),
+            onCellHover: (persona, index) => {
+              playCursorMove();
+              setHoveredPersona(persona);
+              setGridIndex(index);
+              setExpandedSkill(null);
+            },
+            onCellLeave: () => setHoveredPersona(null),
+            onActionClick: (persona) => handlePersonaSelect(persona),
+            onBack: handleBackToStart,
+            onScratch: handleStartFromScratch,
+            showKeyboardNav: true,
+          })
         )}
 
         {/* ─── SCREEN 3: API KEY ENTRY ─── */}
@@ -1271,7 +1883,17 @@ export default function Home() {
             {/* Selected Persona or Blank */}
             {selectedPersona ? (
               <div className="flex flex-col items-center gap-2">
-                <span className="text-5xl">{selectedPersona.icon}</span>
+                {selectedPersona.sprite ? (
+                  <img
+                    src={selectedPersona.sprite}
+                    alt={selectedPersona.name}
+                    className="w-16 h-16 object-contain"
+                    style={{ filter: `drop-shadow(0 0 6px ${colorToCssVar(selectedPersona.color)})` }}
+                    draggable={false}
+                  />
+                ) : (
+                  <span className="text-5xl">{selectedPersona.icon}</span>
+                )}
                 <span
                   className={`pixel-font text-[10px] ${colorToTw(selectedPersona.color, "text")}`}
                 >
@@ -1316,7 +1938,15 @@ export default function Home() {
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") handleLaunch();
+                if (e.key === "Enter" && apiKey.trim()) {
+                  if (SHOW_INTEGRATIONS) {
+                    ArcadeSounds.select();
+                    ArcadeSounds.screenTransition();
+                    setScreen("powerups");
+                  } else {
+                    handleLaunch();
+                  }
+                }
               }}
               placeholder="sk-... (YOU KNOW THE DRILL)"
               className="arcade-input w-full py-3 px-4 text-sm"
@@ -1326,7 +1956,16 @@ export default function Home() {
             {/* Actions */}
             <div className="flex gap-3">
               <button
-                onClick={handleLaunch}
+                onClick={() => {
+                  if (!apiKey.trim()) return;
+                  if (SHOW_INTEGRATIONS) {
+                    ArcadeSounds.select();
+                    ArcadeSounds.screenTransition();
+                    setScreen("powerups");
+                  } else {
+                    handleLaunch();
+                  }
+                }}
                 onMouseEnter={() => ArcadeSounds.buttonHover()}
                 disabled={!apiKey.trim()}
                 className={`
@@ -1338,7 +1977,7 @@ export default function Home() {
                   }
                 `}
               >
-                LAUNCH INSTANCE
+                {SHOW_INTEGRATIONS ? "NEXT" : "DEPLOY"}
               </button>
               <button
                 onClick={() => {
@@ -1349,6 +1988,253 @@ export default function Home() {
                 }}
                 onMouseEnter={() => ArcadeSounds.buttonHover()}
                 className="arcade-btn text-arcade-pink px-6"
+                style={{ borderColor: "var(--arcade-pink)" }}
+              >
+                BACK
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ─── SCREEN 3.5: POWER-UPS ─── */}
+        {SHOW_INTEGRATIONS && !isLoading && screen === "powerups" && (
+          <div className="w-full max-w-2xl space-y-8">
+            {/* Header */}
+            <div className="text-center space-y-2">
+              <h2 className="pixel-font text-arcade-yellow arcade-text text-sm sm:text-base">
+                POWER UPS
+              </h2>
+              <p className="pixel-font text-white/25 text-[7px] tracking-wider">
+                CONNECT YOUR AGENTS TO THE WORLD. OR DON&apos;T. THEY&apos;LL STILL WORK.
+              </p>
+            </div>
+
+            {/* Channel Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {/* Slack */}
+              <div
+                className="powerup-card"
+                data-enabled={!!setupChannels.slack}
+                style={{ "--powerup-color": "var(--arcade-green)" } as React.CSSProperties}
+              >
+                <div className="powerup-card-header">
+                  <span className="powerup-card-icon" style={{ background: "var(--arcade-green)", color: "#000" }}>
+                    #
+                  </span>
+                  <span className="pixel-font text-[9px] text-white/80">SLACK</span>
+                  <button
+                    onClick={() => {
+                      ArcadeSounds.buttonClick();
+                      setSetupChannels((prev) =>
+                        prev.slack
+                          ? (() => { const { slack: _, ...rest } = prev; return rest; })()
+                          : { ...prev, slack: { appToken: "", botToken: "", userToken: "" } }
+                      );
+                    }}
+                    className={`powerup-toggle ${setupChannels.slack ? "powerup-toggle-on" : ""}`}
+                    aria-label={setupChannels.slack ? "Disconnect Slack" : "Connect Slack"}
+                  >
+                    <span className="powerup-toggle-knob" />
+                  </button>
+                </div>
+                {setupChannels.slack && (
+                  <div className="powerup-card-body space-y-2">
+                    <a
+                      href="https://docs.openclaw.ai/channels/slack"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="pixel-font text-[7px] text-white/30 hover:text-white/60 transition-colors inline-block mb-1"
+                    >
+                      Setup guide →
+                    </a>
+                    <div>
+                      <label className="pixel-font text-[6px] text-white/30 tracking-wider">APP TOKEN</label>
+                      <input
+                        type="password"
+                        value={setupChannels.slack.appToken}
+                        onChange={(e) =>
+                          setSetupChannels((prev) => ({
+                            ...prev,
+                            slack: { appToken: e.target.value, botToken: prev.slack?.botToken ?? "", userToken: prev.slack?.userToken ?? "" },
+                          }))
+                        }
+                        placeholder="xapp-..."
+                        className="arcade-input w-full py-2 px-3 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="pixel-font text-[6px] text-white/30 tracking-wider">BOT TOKEN</label>
+                      <input
+                        type="password"
+                        value={setupChannels.slack.botToken}
+                        onChange={(e) =>
+                          setSetupChannels((prev) => ({
+                            ...prev,
+                            slack: { appToken: prev.slack?.appToken ?? "", botToken: e.target.value, userToken: prev.slack?.userToken ?? "" },
+                          }))
+                        }
+                        placeholder="xoxb-..."
+                        className="arcade-input w-full py-2 px-3 text-xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="pixel-font text-[6px] text-white/30 tracking-wider">USER TOKEN (OPTIONAL)</label>
+                      <input
+                        type="password"
+                        value={setupChannels.slack.userToken ?? ""}
+                        onChange={(e) =>
+                          setSetupChannels((prev) => ({
+                            ...prev,
+                            slack: { appToken: prev.slack?.appToken ?? "", botToken: prev.slack?.botToken ?? "", userToken: e.target.value },
+                          }))
+                        }
+                        placeholder="xoxp-..."
+                        className="arcade-input w-full py-2 px-3 text-xs"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Telegram */}
+              <div
+                className="powerup-card"
+                data-enabled={!!setupChannels.telegram}
+                style={{ "--powerup-color": "var(--arcade-blue)" } as React.CSSProperties}
+              >
+                <div className="powerup-card-header">
+                  <span className="powerup-card-icon" style={{ background: "var(--arcade-blue)", color: "#000" }}>
+                    {"\u2708"}
+                  </span>
+                  <span className="pixel-font text-[9px] text-white/80">TELEGRAM</span>
+                  <button
+                    onClick={() => {
+                      ArcadeSounds.buttonClick();
+                      setSetupChannels((prev) =>
+                        prev.telegram
+                          ? (() => { const { telegram: _, ...rest } = prev; return rest; })()
+                          : { ...prev, telegram: { botToken: "" } }
+                      );
+                    }}
+                    className={`powerup-toggle ${setupChannels.telegram ? "powerup-toggle-on" : ""}`}
+                    aria-label={setupChannels.telegram ? "Disconnect Telegram" : "Connect Telegram"}
+                  >
+                    <span className="powerup-toggle-knob" />
+                  </button>
+                </div>
+                {setupChannels.telegram && (
+                  <div className="powerup-card-body">
+                    <a
+                      href="https://docs.openclaw.ai/channels/telegram"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="pixel-font text-[7px] text-white/30 hover:text-white/60 transition-colors inline-block mb-1"
+                    >
+                      Setup guide →
+                    </a>
+                    <label className="pixel-font text-[6px] text-white/30 tracking-wider">BOT TOKEN</label>
+                    <input
+                      type="password"
+                      value={setupChannels.telegram.botToken}
+                      onChange={(e) =>
+                        setSetupChannels((prev) => ({
+                          ...prev,
+                          telegram: { botToken: e.target.value },
+                        }))
+                      }
+                      placeholder="123456:ABC-..."
+                      className="arcade-input w-full py-2 px-3 text-xs"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Discord */}
+              <div
+                className="powerup-card"
+                data-enabled={!!setupChannels.discord}
+                style={{ "--powerup-color": "var(--arcade-purple)" } as React.CSSProperties}
+              >
+                <div className="powerup-card-header">
+                  <span className="powerup-card-icon" style={{ background: "var(--arcade-purple)", color: "#fff" }}>
+                    {"\uD83C\uDFAE"}
+                  </span>
+                  <span className="pixel-font text-[9px] text-white/80">DISCORD</span>
+                  <button
+                    onClick={() => {
+                      ArcadeSounds.buttonClick();
+                      setSetupChannels((prev) =>
+                        prev.discord
+                          ? (() => { const { discord: _, ...rest } = prev; return rest; })()
+                          : { ...prev, discord: { token: "" } }
+                      );
+                    }}
+                    className={`powerup-toggle ${setupChannels.discord ? "powerup-toggle-on" : ""}`}
+                    aria-label={setupChannels.discord ? "Disconnect Discord" : "Connect Discord"}
+                  >
+                    <span className="powerup-toggle-knob" />
+                  </button>
+                </div>
+                {setupChannels.discord && (
+                  <div className="powerup-card-body">
+                    <a
+                      href="https://docs.openclaw.ai/channels/discord"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="pixel-font text-[7px] text-white/30 hover:text-white/60 transition-colors inline-block mb-1"
+                    >
+                      Setup guide →
+                    </a>
+                    <label className="pixel-font text-[6px] text-white/30 tracking-wider">BOT TOKEN</label>
+                    <input
+                      type="password"
+                      value={setupChannels.discord.token}
+                      onChange={(e) =>
+                        setSetupChannels((prev) => ({
+                          ...prev,
+                          discord: { token: e.target.value },
+                        }))
+                      }
+                      placeholder="MTk2..."
+                      className="arcade-input w-full py-2 px-3 text-xs"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex flex-col sm:flex-row gap-3 items-center justify-center">
+              <button
+                onClick={handleLaunch}
+                onMouseEnter={() => ArcadeSounds.buttonHover()}
+                className="pixel-font text-[10px] sm:text-xs py-4 px-10 bg-arcade-green text-black border-2 border-arcade-green hover:shadow-[0_0_16px_var(--arcade-green)] hover:scale-[1.02] active:scale-95 transition-all duration-200 cursor-pointer"
+              >
+                DEPLOY
+              </button>
+              <button
+                onClick={() => {
+                  ArcadeSounds.buttonClick();
+                  setSetupChannels({});
+                  handleLaunch();
+                }}
+                onMouseEnter={() => ArcadeSounds.buttonHover()}
+                className="pixel-font text-[8px] text-white/30 hover:text-white/50 transition-all cursor-pointer"
+              >
+                SKIP — DEPLOY WITHOUT CHANNELS
+              </button>
+            </div>
+
+            {/* Back */}
+            <div className="flex justify-center">
+              <button
+                onClick={() => {
+                  ArcadeSounds.back();
+                  ArcadeSounds.screenTransition();
+                  setScreen("apikey");
+                }}
+                onMouseEnter={() => ArcadeSounds.buttonHover()}
+                className="arcade-btn text-arcade-pink"
                 style={{ borderColor: "var(--arcade-pink)" }}
               >
                 BACK
@@ -1382,9 +2268,19 @@ export default function Home() {
             {/* Deploy Animation */}
             {!showLaunchFlash && !showOnline && !showReady && deploying && (
               <div className="flex flex-col items-center gap-4 py-4">
-                <span className="text-5xl sm:text-6xl">
-                  {selectedPersona?.icon ?? "\uD83E\uDD16"}
-                </span>
+                {selectedPersona?.sprite ? (
+                  <img
+                    src={selectedPersona.sprite}
+                    alt={selectedPersona.name}
+                    className="w-16 h-16 sm:w-20 sm:h-20 object-contain"
+                    style={{ filter: `drop-shadow(0 0 8px ${colorToCssVar(selectedPersona.color)})` }}
+                    draggable={false}
+                  />
+                ) : (
+                  <span className="text-5xl sm:text-6xl">
+                    {selectedPersona?.icon ?? "\uD83E\uDD16"}
+                  </span>
+                )}
                 {selectedPersona && (
                   <span
                     className={`pixel-font text-[8px] ${colorToTw(selectedPersona.color, "text")}`}
@@ -1413,27 +2309,29 @@ export default function Home() {
                   READY TO WORK
                 </p>
 
-                {activeInstance.dashboardUrl && (
-                  <a
-                    href={activeInstance.dashboardUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onMouseEnter={() => ArcadeSounds.buttonHover()}
-                    onClick={() => ArcadeSounds.buttonClick()}
-                    className="inline-block pixel-font text-xs bg-arcade-green text-black py-4 px-8 border-2 border-arcade-green hover:shadow-[0_0_20px_var(--arcade-green)] hover:scale-105 transition-all duration-200 cursor-pointer"
-                  >
-                    OPEN DASHBOARD
-                  </a>
-                )}
+                <div className="flex flex-col items-center gap-5">
+                  {activeInstance.dashboardUrl && (
+                    <a
+                      href={activeInstance.dashboardUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onMouseEnter={() => ArcadeSounds.buttonHover()}
+                      onClick={() => ArcadeSounds.buttonClick()}
+                      className="pixel-font text-xs bg-arcade-green text-black py-4 px-8 border-2 border-arcade-green hover:shadow-[0_0_20px_var(--arcade-green)] hover:scale-105 transition-all duration-200 cursor-pointer"
+                    >
+                      OPEN DASHBOARD
+                    </a>
+                  )}
 
-                <button
-                  onClick={handleBackToStart}
-                  onMouseEnter={() => ArcadeSounds.buttonHover()}
-                  className="block mx-auto arcade-btn text-arcade-yellow text-[9px]"
-                  style={{ borderColor: "var(--arcade-yellow)" }}
-                >
-                  BACK TO HOME
-                </button>
+                  <button
+                    onClick={handleBackToStart}
+                    onMouseEnter={() => ArcadeSounds.buttonHover()}
+                    className="arcade-btn text-arcade-yellow text-[9px]"
+                    style={{ borderColor: "var(--arcade-yellow)" }}
+                  >
+                    BACK TO HOME
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1512,11 +2410,35 @@ export default function Home() {
 
       {/* ═══════ FOOTER ═══════ */}
       <footer className="border-t border-white/10 px-4 py-4">
-        <div className="max-w-4xl mx-auto text-center">
-          <p className="pixel-font text-[7px] text-white/30 tracking-wider">
-            CLAWGENT {"\u00A9"} 2026 &mdash; EVERY INSTANCE GETS ITS OWN
-            DOCKER CONTAINER. NO SHARED STATE. NO DRAMA.
-          </p>
+        <div className="max-w-4xl mx-auto flex flex-col items-center gap-2">
+          <div className="flex items-center gap-4">
+            {/* SOC2 Badge */}
+            <div className="flex items-center gap-1.5 px-2 py-1 border border-green-500/30 rounded bg-green-500/5">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2L3 7v5c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" fill="#22c55e" fillOpacity="0.3" stroke="#22c55e" strokeWidth="1.5"/>
+                <path d="M9 12l2 2 4-4" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              <span className="pixel-font text-[6px] text-green-400/80 tracking-wider">SOC2 COMPLIANT</span>
+            </div>
+            <span className="text-white/15 text-[6px]" aria-hidden="true">{"\u2502"}</span>
+            <p className="pixel-font text-[6px] text-white/25 tracking-wider">
+              ISOLATED DOCKER CONTAINERS {"\u2022"} YOUR KEYS NEVER LEAVE YOUR INSTANCE
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <a
+              href="https://nex.ai?utm_source=clawgent.ai&utm_medium=footer&utm_campaign=powered_by"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="pixel-font text-[6px] text-white/30 hover:text-white/50 transition-opacity tracking-wider"
+            >
+              POWERED BY NEX.AI
+            </a>
+            <span className="text-white/15 text-[6px]" aria-hidden="true">{"\u2502"}</span>
+            <p className="pixel-font text-[6px] text-white/30 tracking-wider">
+              CLAWGENT {"\u00A9"} 2026
+            </p>
+          </div>
         </div>
       </footer>
     </div>

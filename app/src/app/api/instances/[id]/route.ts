@@ -9,7 +9,8 @@ export async function GET(
   const { id } = await params;
   let instance = instances.get(id);
 
-  // If not found, try reconciling with Docker first
+  // If not found in memory/DB, try reconciling with Docker first
+  // (only reconciles running containers to avoid race conditions with destroyed instances)
   if (!instance) {
     await reconcileWithDocker();
     instance = instances.get(id);

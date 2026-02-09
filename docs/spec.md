@@ -1,6 +1,6 @@
 # Clawgent - Product Specification
 
-> Last updated: 2026-02-08 (Iteration 6 — GTM Engineer persona, 25 marketing skills, WorkOS auth, persona injection)
+> Last updated: 2026-02-09 (Iteration 10 — Ghost instance bug fixed, CI/CD pipelines created, ARM64 migration, full deployment LIVE at https://clawgent.ai)
 
 ## 1. What is Clawgent?
 
@@ -9,17 +9,27 @@ Clawgent is a web app that lets anyone deploy isolated [OpenClaw](https://github
 **Inspired by**: openclaw.com ecosystem
 **Our repo**: nex-crm/clawgent (GitHub, private)
 **Local path**: /Users/najmuzzaman/Documents/clawgent
+**Domain**: clawgent.ai (AWS deployment planned)
 
 ## 2. Core User Flow (Current MVP)
 
-The UI uses a retro arcade visual aesthetic (Street Fighter 2-inspired) with CRT scanlines, pixel fonts (Press Start 2P), and neon colors — but all labels use clear agent/deployment terminology (no game jargon). The flow is a 4-screen state machine:
+The UI uses a retro arcade visual aesthetic (Street Fighter 2 / CPS-1 / SNES-inspired) with CRT scanlines, pixel fonts (Press Start 2P), and a CPS-1 authentic color palette — but all labels use clear agent/deployment terminology (no game jargon). The flow is a 4-screen state machine:
 
-1. **Start Screen** (`http://localhost:3001`) — Auth-aware: unauthenticated users see "SIGN IN WITH GOOGLE"; authenticated users with no instance see "DEPLOY OPENCLAW"; authenticated users with an active instance see "OPEN DASHBOARD"
-2. **Agent Select** — Pick one of 9 AI personas, each with recommended model, skills, and neon color (SF2-style character select grid):
-   - Marketing Pro (25 skills from coreyhaines31/marketingskills), Sales Assistant, Lead Gen Machine, Dev Copilot, Support Agent, Ops Automator, Founder Sidekick, Data Analyst, GTM Engineer (6 skills from josephdeville/GTMClaudSkills)
+1. **Start Screen** (`http://localhost:3001`) — SNES-style select menu with two options:
+   - "DEPLOY OPENCLAW IN A MIN" → triggers auth (if needed) then goes to agent select
+   - "STAY IRRELEVANT" → snarky joke response with shake animation, snaps back to option 1
+   - Keyboard navigable (arrow keys + Enter)
+   - If authenticated with running instance: shows instance management panel with agents roster
+2. **Agent Select** — SF2 character select screen with 3x3 grid + preview panel:
+   - 9 AI personas with per-persona neon colors, emoji icons, skill counts
+   - Grid has thick yellow frame, L-shaped corner cursors on active cell
+   - Preview panel shows persona name, tagline (pixel font), model, skills count, skill pills (max 4 shown)
+   - Fixed-height preview panel (480px) — no layout shift on hover
+   - Keyboard nav (arrow keys for 3x3 grid, Enter to select, Esc to go back)
+   - "SKIP TEMPLATE" option for blank instance
 3. **API Key Entry** — Select model provider (Claude Sonnet 4.5 / Gemini 3 Flash / GPT-5.2), enter API key (masked password input)
 4. **Deploy** — Triggers POST /api/deploy, shows deployment progress with health-bar animation
-5. **Active Agents** — Instance list showing persona, status, and actions (Open Dashboard, Destroy)
+5. **Active Agents** — Instance panel showing agents roster with add/remove, deep links
 6. **Open Dashboard** — Navigates to `/i/{id}/` → proxy serves OpenClaw dashboard
 7. **Destroy when done** — Click "Destroy" to stop and remove container
 
@@ -31,7 +41,8 @@ Full persona config is injected into the container after gateway health check. T
 
 ### Stack
 - **Frontend**: Next.js 16.1.6 (App Router), React 19, Tailwind v4, TypeScript
-- **Auth**: Google Sign-In via WorkOS AuthKit (`@workos-inc/authkit-nextjs` v2.13.0)
+- **Auth**: WorkOS AuthKit Magic Auth (`@workos-inc/authkit-nextjs` v2.13.0), dev-mode bypass
+- **Storage**: SQLite via better-sqlite3 (`app/data/clawgent.db`, WAL mode)
 - **Custom server**: `app/server.ts` — raw TCP WebSocket proxy wrapping Next.js
 - **Dev command**: `npm run dev` (runs `tsx server.ts`) on port 3001
 - **Container runtime**: Docker (local)
@@ -50,6 +61,12 @@ Browser (localhost:3001)
    │   ├─ GET  /api/deploy           → lists all instances (auth)
    │   ├─ GET  /api/instances/:id    → instance detail + logs (auth)
    │   ├─ DELETE /api/instances/:id  → destroy container (auth, owner only)
+   │   ├─ GET  /api/instances/:id/agents    → list agents (auth)
+   │   ├─ POST /api/instances/:id/agents    → add agent (auth)
+   │   ├─ DELETE /api/instances/:id/agents/:agentId → remove agent (auth)
+   │   ├─ GET  /api/instances/:id/channels → list channels (auth)
+   │   ├─ POST /api/instances/:id/channels → connect channel (auth)
+   │   ├─ DELETE /api/instances/:id/channels/:type → disconnect channel (auth)
    │   ├─ GET  /api/status           → Docker + instance count (public)
    │   │
    │   └─ GET  /i/{id}/              → 302 redirect (adds ?token=)
@@ -98,111 +115,180 @@ Each Docker container:
 - `withAuth({ ensureSignedIn: true })` in API routes returns `UserInfo` with `user.id`
 - One instance per user enforced in deploy API (returns 409 if user already has an instance)
 - Instance destroy requires ownership (userId match)
+- Dev-mode bypass: when WorkOS env vars missing, uses `dev-user-local` as userId
 
 **State Management**:
-- `globalThis.__clawgent_instances` Map survives Next.js hot reloads
+- SQLite-backed InstanceStore with Map-like API (`app/src/lib/instances.ts`)
+- Periodic flush for dirty instances, WAL mode for concurrency
 - `reconcileWithDocker()` recovers state from Docker containers after full restart
 - Extracts tokens from running containers via `docker exec env`
 - Instances tagged with `userId` for ownership tracking
 
 ## 4. Known Issues
 
+### FIXED: Destroyed instance reappears after page refresh
+
+**Status**: FIXED (2026-02-09). Root cause: `reconcileWithDocker()` was using `docker ps -a` (all containers including stopped/removing ones) and re-adding instances from containers that were in the process of being destroyed. Fixed by changing to `docker ps` (only running containers) and adding DB check to prevent overwriting existing records. Race condition eliminated.
+
+### FIXED: First deploy — agent not detected on home screen
+
+**Status**: FIXED (2026-02-09). Root cause: OpenClaw 2026.2.x changed API response structure for `openclaw agents list --json`. Frontend was looking for `name`/`emoji` fields, but OpenClaw now returns `identityName`/`identityEmoji`. Updated frontend to use correct field names. Bug resolved.
+
+### Slack integration not working
+
+**Status**: Active issue. Slash command returns dispatch_failed error. Needs:
+1. Slash command created in Slack app
+2. Event Subscriptions enabled
+3. Proper OAuth scopes configured
+
+Integrations currently hidden behind SHOW_INTEGRATIONS = false flag until fixed.
+
 ### FIXED: "pairing required" (1008) in all browsers
 
 **Status**: Fixed. Two issues were resolved:
 
-1. **Device pairing auto-approval**: OpenClaw requires device pairing even with `--allow-unconfigured`. The gateway creates a pending pairing request when a new device connects, but only auto-approves if `silent: true` (which the web UI doesn't set). Fix: added `startPairingAutoApprover()` in `deploy/route.ts` that polls `pending.json` every 2s via `docker exec` and approves any pending requests. First-time connect takes ~6s (initial failure → auto-approve → reconnect).
+1. **Device pairing auto-approval**: OpenClaw requires device pairing even with `--allow-unconfigured`. Fix: `startPairingAutoApprover()` polls `pending.json` every 2s via `docker exec`.
 
-2. **localStorage injection**: Now injects both `gatewayUrl` AND `token` on ALL proxied HTML pages (not just root), and clears all `openclaw*` keys to remove stale pairing data from previous instances.
-
-**Previous e2e test was a false positive**: `text=connected` matched inside "disconnected". Updated test now properly waits for auto-pairing and verifies `openclaw.device.auth.v1` is set in localStorage.
+2. **localStorage injection**: Injects both `gatewayUrl` AND `token` on ALL proxied HTML pages, clears all `openclaw*` keys.
 
 ### Other
+- No auto-expiry for instances (permanent, one per user)
+- Legacy `simpleclaw-*` containers/volumes may exist on dev machines — clean with `docker rm -f` and `docker volume rm`
+- deploy.sh doesn't pass SSH key — manual rsync needed or update script
+- WorkOS production credentials not yet on EC2 (dev-mode bypass active)
 
-- No auto-expiry for instances (2-hour TTL per PRD)
-- In-memory state (not persisted to disk — globalThis-backed only)
-- No tests beyond the single e2e script
+## 5. What's Working
 
-## 5. What's Working (Verified by Playwright E2E)
-
-- [x] Landing page loads with Deploy button
-- [x] Deploy creates Docker container, shows progress
+- [x] Landing page with SNES-style select menu (Deploy / Stay Irrelevant)
+- [x] SF2 character select grid (3x3, keyboard nav, preview panel, SNES-authentic styling)
+- [x] Character sprites fill grid cells (object-fit: cover + scale(1.4), name label strip)
+- [x] Deploy creates Docker container, shows progress with health bar
 - [x] Instance reaches "running" state (health check passes)
 - [x] Dashboard link navigates to `/i/{id}/`
 - [x] Proxy serves OpenClaw HTML + all assets (no 404s)
 - [x] `?token=` redirect provides auth to OpenClaw natively
 - [x] `gatewayUrl` injected into localStorage via `<script>` in HTML
-- [x] WebSocket connects through raw TCP proxy (zero WS errors in Playwright)
-- [x] OpenClaw app bootstraps (`<openclaw-app>` renders, device identity created)
+- [x] WebSocket connects through raw TCP proxy (zero WS errors)
 - [x] Destroy stops and removes container + volume
-- [x] Multiple instances can run simultaneously on different ports
-- [x] Docker reconciliation recovers state after server restart
-- [x] Google Sign-In via WorkOS AuthKit
+- [x] Docker reconciliation recovers state after server restart (ghost instance bug fixed)
+- [x] WorkOS Magic Auth (dev-mode bypass when unconfigured)
 - [x] One instance per user (deploy returns 409 for duplicate)
 - [x] Auth-aware frontend (sign in → deploy → manage → sign out)
 - [x] Persona config injection (SOUL.md, IDENTITY.md, skills, HEARTBEAT.md, BOOTSTRAP.md removal)
-- [x] 9 personas including GTM Engineer and Marketing Pro with 25 skills
+- [x] 9 personas including GTM Engineer (6 skills) and Marketing Pro (25 skills)
+- [x] Multi-agent support (add/remove agents to running instances)
+- [x] Agent deep linking via `?session=agent:{agentId}:main`
+- [x] SQLite persistence (survives restarts)
+- [x] Retro arcade sound engine (16 Web Audio API effects + mute toggle)
+- [x] Comprehensive e2e test suite (10 sections: status, auth, validation, lifecycle, multi-agent, UI smoke, cleanup)
+- [x] AWS deployment infrastructure (Dockerfile, nginx, PM2, setup/deploy scripts, deployment guide)
+- [x] AWS EC2 deployment LIVE (i-04df8a4321868b068, t4g.micro ARM64, EIP: 100.31.178.189, HTTPS working)
+- [x] Channel integrations backend (Slack/Telegram/Discord API complete, config injection via openclaw.json)
+- [x] Channel integrations frontend (full connect/disconnect flow wired, hidden behind SHOW_INTEGRATIONS flag)
+- [x] Slack User OAuth Token support (optional xoxp-... token, slashCommand + commands config)
+- [x] Setup guide links for each channel (docs.openclaw.ai)
+- [x] Power-ups screen (skippable, 9 integrations, status indicators on home screen)
+- [x] Nex.ai branding (logo moved to right under CLAWGENT title, UTM link, OG meta tags)
+- [x] Subtitle updated ("DEPLOY OPENCLAW UNDER A MINUTE. / GET IT GOING ON DAY-1 WITH PRE-BUILT AGENTS")
+- [x] Discord invite link (top-right, fixed, https://discord.gg/YV9pGMpFQJ)
+- [x] Character sprites (9 compressed PNGs in public/sprites/, all personas covered including GTM Engineer)
+- [x] Agent roster sprites on home screen (character images for all agents)
+- [x] Consolidated screens (shared renderPersonaSelect() for deploy + add-agent)
+- [x] Product audit complete (PM agent, 7/10 launch readiness, all blockers resolved)
+- [x] CI/CD pipelines (.github/workflows/ci.yml + cd.yml)
+- [x] 2GB swap file on EC2 (prevents OOM during builds)
 
 ## 6. File Map
 
 | File | Purpose |
 |------|---------|
+| `CLAUDE.md` | Project guide for Claude Code (living document) |
 | `app/server.ts` | Custom HTTP server, raw TCP WS proxy, Next.js HMR delegation |
-| `app/src/middleware.ts` | WorkOS AuthKit middleware (protects API routes) |
-| `app/src/app/page.tsx` | Auth-aware multi-screen arcade frontend (~1080 lines) |
+| `app/src/middleware.ts` | WorkOS AuthKit middleware (dev-mode bypass) |
+| `app/src/app/page.tsx` | Multi-screen arcade frontend (~1700 lines, integrations wired) |
 | `app/src/app/layout.tsx` | Root layout with AuthKitProvider + Press Start 2P font |
-| `app/src/app/globals.css` | Retro arcade CSS design system |
+| `app/src/app/globals.css` | SNES-authentic retro arcade CSS design system (~1150 lines) |
 | `app/src/app/actions/auth.ts` | Server actions for sign-in URL and sign-out |
 | `app/src/app/auth/callback/route.ts` | WorkOS AuthKit callback handler |
 | `app/src/app/api/user/route.ts` | Returns current user info + their instance |
 | `app/src/app/api/deploy/route.ts` | POST: create instance (auth, 1/user), GET: list instances |
 | `app/src/app/api/instances/[id]/route.ts` | GET: detail+logs, DELETE: destroy (owner only) |
+| `app/src/app/api/instances/[id]/agents/route.ts` | GET: list agents, POST: add agent |
+| `app/src/app/api/instances/[id]/agents/[agentId]/route.ts` | DELETE: remove agent |
+| `app/src/app/api/instances/[id]/channels/route.ts` | GET: list channels, POST: connect channel |
+| `app/src/app/api/instances/[id]/channels/[channelType]/route.ts` | DELETE: disconnect channel |
 | `app/src/app/api/status/route.ts` | Docker availability + instance count (public) |
 | `app/src/app/i/[id]/proxy.ts` | Shared HTTP reverse proxy logic, HTML injection |
-| `app/src/app/i/[id]/route.ts` | Root path proxy handler (GET/POST/PUT/DELETE) |
+| `app/src/app/i/[id]/route.ts` | Root path proxy handler |
 | `app/src/app/i/[id]/[...path]/route.ts` | Catch-all sub-path proxy |
-| `app/src/lib/instances.ts` | Instance types, globalThis store, Docker reconciliation, findInstanceByUserId |
-| `app/src/lib/personas.ts` | 9 persona configs with SOUL.md/IDENTITY.md/skills/HEARTBEAT.md templates |
-| `app/.env.example` | WorkOS env var template |
-| `app/test-e2e.mjs` | Playwright e2e test script |
+| `app/src/lib/instances.ts` | InstanceStore (SQLite-backed), Docker orchestration, reconcileWithDocker fix |
+| `app/src/lib/db.ts` | SQLite database module (WAL mode) |
+| `app/src/lib/personas.ts` | 9 persona configs with skills, SOUL.md, IDENTITY.md |
+| `app/src/lib/agent-config.ts` | Shared `configureAgentPersona()` for deploy + add-agent |
+| `app/src/lib/channels.ts` | Channel types, validation, config builders (Slack/Telegram/Discord) with slashCommand + commands + userToken |
+| `app/src/lib/auth-config.ts` | WorkOS config flag, DEV_USER_ID |
+| `app/src/lib/use-auth-safe.ts` | Client auth hook (works with/without AuthKitProvider) |
+| `app/src/lib/sounds.ts` | Retro arcade sound engine (16 Web Audio API effects) |
+| `public/sprites/*.png` | 9 compressed persona sprite images (all personas covered) |
+| `public/sprites/character-9.png` | GTM Engineer sprite |
+| `public/nex-logo.svg` | Nex.ai logo reference |
+| `app/.env.example` | WorkOS + app env var template |
+| `app/test-e2e.mjs` | Comprehensive Playwright e2e test (10 sections) |
+| `app/Dockerfile` | Production Docker image |
 | `app/next.config.ts` | `skipTrailingSlashRedirect: true` |
-| `docs/product-requirements.md` | Full PRD (Lenny-style) |
-| `docs/routing-architecture.md` | Proxy architecture research |
-| `docs/architecture-review.md` | Security/scalability review |
-| `docs/frontend-design.md` | UX design spec for next iteration |
+| `.github/workflows/ci.yml` | CI pipeline (lint, typecheck, build on PR) |
+| `.github/workflows/cd.yml` | CD pipeline (auto-deploy to EC2 on push to main) |
+| `deploy/setup.sh` | EC2 environment provisioning (ARM64 notes, swap file) |
+| `deploy/deploy.sh` | Application deployment automation (needs SSH key fix) |
+| `deploy/ecosystem.config.js` | PM2 process management config |
+| `deploy/nginx.conf` | Nginx reverse proxy with WS support + SSL + rate limiting |
+| `docs/deployment-aws.md` | AWS deployment guide (updated for new instance) |
+| `docs/product-requirements.md` | Full PRD |
+| `docs/openclaw-skills-by-persona.md` | Complete skill library (9 personas) |
 
 ## 7. MVP Scope
 
 ### What's IN
-- Retro arcade visual aesthetic (SF2-inspired style, no game jargon in labels)
+- SNES-authentic retro arcade visual aesthetic (CPS-1 palette, pixel font, CRT scanlines, thick grid borders)
+- SNES-style start menu (Deploy / Stay Irrelevant with snarky responses)
+- SF2 character select grid with preview panel (fixed-height, no layout shift)
 - Auth-aware 4-screen flow: Start → Agent Select (9 personas) → API Key → Deploy
-- Google Sign-In via WorkOS AuthKit (one instance per user)
+- WorkOS Magic Auth (dev-mode bypass when unconfigured)
 - 9 AI persona templates with recommended models, skills, and neon colors
-  - Marketing Pro with all 25 skills from coreyhaines31/marketingskills
-  - GTM Engineer with 6 skills from josephdeville/GTMClaudSkills (gtm-context-os, copywriting, clay-automation, hubspot-operations, data-orchestration, technical-writing)
-  - Sales Assistant, Lead Gen Machine, Dev Copilot, Support Agent, Ops Automator, Founder Sidekick, Data Analyst (3 skills each)
-- Persona-specific Docker config injection after health check (SOUL.md, IDENTITY.md, workspace skills, HEARTBEAT.md, BOOTSTRAP.md removal)
+- Multi-agent per instance (add/remove agents, deep linking)
+- Persona-specific Docker config injection after health check
 - Model provider selection (Claude Sonnet 4.5, Gemini 3 Flash, GPT-5.2)
 - API key input (masked password field, required before deploy)
-- Landing page on localhost (port 3001)
-- One-click deploy (Docker containers)
-- Unique dashboard URLs at `/i/{id}/`
+- One-click deploy (Docker containers) with progress animation
 - Full reverse proxy (HTTP + WebSocket)
-- Instance list as "Active Agents" panel
-- Deployment log panel
-- System status header
+- SQLite persistence (survives restarts)
+- Arcade sound engine (16 effects + mute toggle)
+- Comprehensive e2e test suite
+- AWS deployment infrastructure (Nginx, PM2, Let's Encrypt, deploy scripts)
 
 ### What's NOT IN
-- No channel integration (Telegram/Discord/WhatsApp)
+- No channel integration UI yet (backend API complete, frontend pending)
+- No power-ups UI yet (design ready, implementation pending)
 - No pricing/billing
-- No production hosting
-- No persistent storage (in-memory only, globalThis-backed)
+- AWS EC2 deployment complete, DNS + SSL pending
 
 ## 8. Open Items (Priority Order)
 
-1. **Auto-expiry for instances** — 2-hour TTL per PRD
-2. **Replace in-memory Map with SQLite** — Persist userId-instance mapping across restarts
-3. **AWS VM deployment** — Future session, eliminates proxy complexity
+### Critical (Post-Launch)
+1. **Fix Slack integration** — Slash command dispatch_failed (needs slash command created in Slack app + Event Subscriptions + scopes). Integrations currently hidden (SHOW_INTEGRATIONS = false).
+2. **Fix deploy.sh SSH** — Doesn't pass `-i ~/.ssh/clawgent-key.pem`, needs update or SSH config entry
+3. **WorkOS production credentials on EC2** — Currently using dev-mode auth bypass
+
+### High Priority
+4. ~~**Wire power-ups frontend to backend**~~ — DONE: Connect/disconnect UI wired to channel API (hidden behind SHOW_INTEGRATIONS flag)
+5. ~~**GTM Engineer sprite**~~ — DONE: character-9.png added
+6. **OG image** — Screenshot of character select for link previews
+7. **Build clawgent-openclaw image on new EC2** — ARM64 instance needs fresh image build
+
+### Medium Priority (Future)
+8. **E2E tests for channels** — Test Slack/Telegram/Discord integrations
+9. **E2E tests for power-ups** — Test activation + status indicators
+10. **CI/CD refinement** — CD pipeline needs SSH key management
 
 ## 9. OpenClaw Key Facts
 
