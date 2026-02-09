@@ -161,12 +161,10 @@ async function deployInstance(
       "run", "-d",
       "--name", instance.containerName,
       "--pids-limit", "256",
-      "--memory", "1g",
       "-p", `${instance.port}:18789`,
       "-v", `${volumeName}:/home/node/.openclaw`,
       "-e", `OPENCLAW_GATEWAY_TOKEN=${instance.token}`,
       "-e", "PORT=18789",
-      "-e", "NODE_OPTIONS=--max-old-space-size=512",
       "-e", `${apiKeyEnvVar}=${apiKey}`,
     ];
     dockerArgs.push(
