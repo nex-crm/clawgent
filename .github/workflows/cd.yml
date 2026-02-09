@@ -105,19 +105,16 @@ jobs:
           EC2_USER: ${{ secrets.EC2_USER }}
           EC2_HOST: ${{ secrets.EC2_HOST }}
 
-      - name: Build OpenClaw Docker image
+      - name: Pull latest OpenClaw Docker image
         run: |
-          scp -i ~/.ssh/deploy_key \
-            deploy/Dockerfile.openclaw \
-            "$EC2_USER@$EC2_HOST:/opt/clawgent/Dockerfile.openclaw"
-
-          ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" bash -s << 'DOCKER_BUILD'
+          ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" bash -s << 'DOCKER_PULL'
             set -euo pipefail
-            echo "Building clawgent-openclaw Docker image..."
-            docker build -t clawgent-openclaw -f /opt/clawgent/Dockerfile.openclaw /opt/clawgent/
-            echo "Docker image built successfully"
+            echo "Pulling latest OpenClaw image from ghcr.io..."
+            docker pull ghcr.io/openclaw/openclaw:latest
+            docker tag ghcr.io/openclaw/openclaw:latest clawgent-openclaw
+            echo "OpenClaw image ready:"
             docker images clawgent-openclaw
-          DOCKER_BUILD
+          DOCKER_PULL
         env:
           EC2_USER: ${{ secrets.EC2_USER }}
           EC2_HOST: ${{ secrets.EC2_HOST }}
