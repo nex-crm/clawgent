@@ -77,29 +77,31 @@ function playTone(
   duration: number,
   type: OscillatorType = "square",
   volume: number = 0.5,
-  envelope?: EnvelopeOpts
+  envelope?: EnvelopeOpts,
+  delay: number = 0
 ): void {
   const c = ensureCtx();
   const m = getMaster();
   if (!c || !m) return;
 
+  const t = c.currentTime + delay;
   const osc = c.createOscillator();
   const gain = c.createGain();
 
   osc.type = type;
-  osc.frequency.setValueAtTime(freq, c.currentTime);
+  osc.frequency.setValueAtTime(freq, t);
 
-  gain.gain.setValueAtTime(0, c.currentTime);
+  gain.gain.setValueAtTime(0, t);
   osc.connect(gain);
   gain.connect(m);
 
-  applyEnvelope(gain, c.currentTime, duration, {
+  applyEnvelope(gain, t, duration, {
     peak: volume,
     ...envelope,
   });
 
-  osc.start(c.currentTime);
-  osc.stop(c.currentTime + duration + 0.05);
+  osc.start(t);
+  osc.stop(t + duration + 0.05);
 }
 
 function playSweep(
@@ -108,45 +110,49 @@ function playSweep(
   duration: number,
   type: OscillatorType = "sawtooth",
   volume: number = 0.4,
-  envelope?: EnvelopeOpts
+  envelope?: EnvelopeOpts,
+  delay: number = 0
 ): void {
   const c = ensureCtx();
   const m = getMaster();
   if (!c || !m) return;
 
+  const t = c.currentTime + delay;
   const osc = c.createOscillator();
   const gain = c.createGain();
 
   osc.type = type;
-  osc.frequency.setValueAtTime(freqStart, c.currentTime);
+  osc.frequency.setValueAtTime(freqStart, t);
   osc.frequency.exponentialRampToValueAtTime(
     Math.max(freqEnd, 20),
-    c.currentTime + duration
+    t + duration
   );
 
-  gain.gain.setValueAtTime(0, c.currentTime);
+  gain.gain.setValueAtTime(0, t);
   osc.connect(gain);
   gain.connect(m);
 
-  applyEnvelope(gain, c.currentTime, duration, {
+  applyEnvelope(gain, t, duration, {
     peak: volume,
     ...envelope,
   });
 
-  osc.start(c.currentTime);
-  osc.stop(c.currentTime + duration + 0.05);
+  osc.start(t);
+  osc.stop(t + duration + 0.05);
 }
 
 function playNoise(
   duration: number,
   volume: number = 0.3,
   filterFreq?: number,
-  filterType: BiquadFilterType = "bandpass"
+  filterType: BiquadFilterType = "bandpass",
+  delay: number = 0
 ): void {
   const c = ensureCtx();
   const m = getMaster();
   if (!c || !m) return;
 
+  const t = c.currentTime + delay;
   const bufferSize = c.sampleRate * duration;
   const buffer = c.createBuffer(1, bufferSize, c.sampleRate);
   const data = buffer.getChannelData(0);
@@ -158,7 +164,7 @@ function playNoise(
   source.buffer = buffer;
 
   const gain = c.createGain();
-  applyEnvelope(gain, c.currentTime, duration, {
+  applyEnvelope(gain, t, duration, {
     peak: volume,
     attack: 0.005,
     release: 0.02,
@@ -167,8 +173,8 @@ function playNoise(
   if (filterFreq) {
     const filter = c.createBiquadFilter();
     filter.type = filterType;
-    filter.frequency.setValueAtTime(filterFreq, c.currentTime);
-    filter.Q.setValueAtTime(2, c.currentTime);
+    filter.frequency.setValueAtTime(filterFreq, t);
+    filter.Q.setValueAtTime(2, t);
     source.connect(filter);
     filter.connect(gain);
   } else {
@@ -176,20 +182,22 @@ function playNoise(
   }
 
   gain.connect(m);
-  source.start(c.currentTime);
-  source.stop(c.currentTime + duration + 0.05);
+  source.start(t);
+  source.stop(t + duration + 0.05);
 }
 
 function playNoiseSweep(
   duration: number,
   freqStart: number,
   freqEnd: number,
-  volume: number = 0.3
+  volume: number = 0.3,
+  delay: number = 0
 ): void {
   const c = ensureCtx();
   const m = getMaster();
   if (!c || !m) return;
 
+  const t = c.currentTime + delay;
   const bufferSize = c.sampleRate * duration;
   const buffer = c.createBuffer(1, bufferSize, c.sampleRate);
   const data = buffer.getChannelData(0);
@@ -202,15 +210,15 @@ function playNoiseSweep(
 
   const filter = c.createBiquadFilter();
   filter.type = "bandpass";
-  filter.Q.setValueAtTime(3, c.currentTime);
-  filter.frequency.setValueAtTime(freqStart, c.currentTime);
+  filter.Q.setValueAtTime(3, t);
+  filter.frequency.setValueAtTime(freqStart, t);
   filter.frequency.exponentialRampToValueAtTime(
     Math.max(freqEnd, 20),
-    c.currentTime + duration
+    t + duration
   );
 
   const gain = c.createGain();
-  applyEnvelope(gain, c.currentTime, duration, {
+  applyEnvelope(gain, t, duration, {
     peak: volume,
     attack: 0.005,
     release: 0.03,
@@ -220,8 +228,8 @@ function playNoiseSweep(
   filter.connect(gain);
   gain.connect(m);
 
-  source.start(c.currentTime);
-  source.stop(c.currentTime + duration + 0.05);
+  source.start(t);
+  source.stop(t + duration + 0.05);
 }
 
 // ─── Arpeggio Helper ─────────────────────────────────────────────────
@@ -230,20 +238,22 @@ function playArpeggio(
   notes: number[],
   noteLength: number,
   type: OscillatorType = "square",
-  volume: number = 0.35
+  volume: number = 0.35,
+  delay: number = 0
 ): void {
   const c = ensureCtx();
   const m = getMaster();
   if (!c || !m) return;
 
+  const baseTime = c.currentTime + delay;
   notes.forEach((freq, i) => {
     const osc = c.createOscillator();
     const gain = c.createGain();
 
     osc.type = type;
-    osc.frequency.setValueAtTime(freq, c.currentTime);
+    const startTime = baseTime + i * noteLength;
+    osc.frequency.setValueAtTime(freq, startTime);
 
-    const startTime = c.currentTime + i * noteLength;
     gain.gain.setValueAtTime(0, startTime);
     applyEnvelope(gain, startTime, noteLength, {
       peak: volume,
@@ -278,10 +288,17 @@ export const ArcadeSounds = {
       return;
     }
 
-    ctx = new AudioContext();
+    ctx = new AudioContext({ latencyHint: "interactive", sampleRate: 44100 });
     masterGain = ctx.createGain();
     masterGain.gain.setValueAtTime(MASTER_VOLUME, ctx.currentTime);
     masterGain.connect(ctx.destination);
+
+    // Pre-warm the audio pipeline with a silent buffer to eliminate first-play lag
+    const silent = ctx.createBuffer(1, 1, 44100);
+    const src = ctx.createBufferSource();
+    src.buffer = silent;
+    src.connect(ctx.destination);
+    src.start();
 
     // Restore mute preference from localStorage
     try {
@@ -331,8 +348,6 @@ export const ArcadeSounds = {
 
   /** Confirmation beep when selecting a persona — two-tone ascending. */
   select(): void {
-    const c = ensureCtx();
-    if (!c) return;
     // 800Hz -> 1200Hz, two quick tones
     playTone(800, 0.06, "square", 0.3, {
       attack: 0.003,
@@ -340,14 +355,12 @@ export const ArcadeSounds = {
       sustain: 0.5,
       release: 0.01,
     });
-    setTimeout(() => {
-      playTone(1200, 0.08, "square", 0.35, {
-        attack: 0.003,
-        decay: 0.03,
-        sustain: 0.4,
-        release: 0.02,
-      });
-    }, 70);
+    playTone(1200, 0.08, "square", 0.35, {
+      attack: 0.003,
+      decay: 0.03,
+      sustain: 0.4,
+      release: 0.02,
+    }, 0.07);
   },
 
   /** Lower-pitched blip for going back. */
@@ -359,14 +372,12 @@ export const ArcadeSounds = {
       sustain: 0.4,
       release: 0.01,
     });
-    setTimeout(() => {
-      playTone(500, 0.07, "square", 0.2, {
-        attack: 0.003,
-        decay: 0.03,
-        sustain: 0.3,
-        release: 0.02,
-      });
-    }, 60);
+    playTone(500, 0.07, "square", 0.2, {
+      attack: 0.003,
+      decay: 0.03,
+      sustain: 0.3,
+      release: 0.02,
+    }, 0.06);
   },
 
   // ─── Screen transitions ──────────────────────────────────────
@@ -408,14 +419,12 @@ export const ArcadeSounds = {
     // C5=523, E5=659, G5=784, C6=1047
     playArpeggio([523, 659, 784, 1047], 0.12, "square", 0.3);
     // Add a sustained final note with triangle for warmth
-    setTimeout(() => {
-      playTone(1047, 0.4, "triangle", 0.2, {
-        attack: 0.01,
-        decay: 0.15,
-        sustain: 0.3,
-        release: 0.2,
-      });
-    }, 480);
+    playTone(1047, 0.4, "triangle", 0.2, {
+      attack: 0.01,
+      decay: 0.15,
+      sustain: 0.3,
+      release: 0.2,
+    }, 0.48);
   },
 
   /** Sad trombone / error buzz — descending minor sequence. */
@@ -423,14 +432,12 @@ export const ArcadeSounds = {
     // Bb4=466, A4=440, Ab4=415, G4=392 — descending chromatic sadness
     playArpeggio([466, 440, 415, 392], 0.15, "sawtooth", 0.25);
     // Add a low buzz
-    setTimeout(() => {
-      playTone(100, 0.3, "sawtooth", 0.15, {
-        attack: 0.01,
-        decay: 0.1,
-        sustain: 0.5,
-        release: 0.1,
-      });
-    }, 600);
+    playTone(100, 0.3, "sawtooth", 0.15, {
+      attack: 0.01,
+      decay: 0.1,
+      sustain: 0.5,
+      release: 0.1,
+    }, 0.6);
   },
 
   // ─── Actions ─────────────────────────────────────────────────
@@ -467,14 +474,12 @@ export const ArcadeSounds = {
       release: 0.1,
     });
     // Low rumble
-    setTimeout(() => {
-      playTone(60, 0.2, "triangle", 0.2, {
-        attack: 0.01,
-        decay: 0.05,
-        sustain: 0.5,
-        release: 0.1,
-      });
-    }, 150);
+    playTone(60, 0.2, "triangle", 0.2, {
+      attack: 0.01,
+      decay: 0.05,
+      sustain: 0.5,
+      release: 0.1,
+    }, 0.15);
   },
 
   // ─── TTL warnings ────────────────────────────────────────────
@@ -487,14 +492,12 @@ export const ArcadeSounds = {
       sustain: 0.5,
       release: 0.02,
     });
-    setTimeout(() => {
-      playTone(440, 0.08, "square", 0.2, {
-        attack: 0.003,
-        decay: 0.02,
-        sustain: 0.5,
-        release: 0.02,
-      });
-    }, 200);
+    playTone(440, 0.08, "square", 0.2, {
+      attack: 0.003,
+      decay: 0.02,
+      sustain: 0.5,
+      release: 0.02,
+    }, 0.2);
   },
 
   /** "TIME OVER" sound — descending tone. */
@@ -522,32 +525,26 @@ export const ArcadeSounds = {
       release: 0.01,
     });
     // Descending coin tumble
-    setTimeout(() => {
-      playSweep(2000, 800, 0.08, "square", 0.25, {
-        attack: 0.002,
-        decay: 0.02,
-        sustain: 0.4,
-        release: 0.02,
-      });
-    }, 40);
+    playSweep(2000, 800, 0.08, "square", 0.25, {
+      attack: 0.002,
+      decay: 0.02,
+      sustain: 0.4,
+      release: 0.02,
+    }, 0.04);
     // Ascending confirmation ding
-    setTimeout(() => {
-      playSweep(600, 1400, 0.12, "square", 0.3, {
-        attack: 0.003,
-        decay: 0.03,
-        sustain: 0.5,
-        release: 0.03,
-      });
-    }, 150);
+    playSweep(600, 1400, 0.12, "square", 0.3, {
+      attack: 0.003,
+      decay: 0.03,
+      sustain: 0.5,
+      release: 0.03,
+    }, 0.15);
     // Final bright ping
-    setTimeout(() => {
-      playTone(1400, 0.1, "sine", 0.2, {
-        attack: 0.003,
-        decay: 0.03,
-        sustain: 0.3,
-        release: 0.04,
-      });
-    }, 280);
+    playTone(1400, 0.1, "sine", 0.2, {
+      attack: 0.003,
+      decay: 0.03,
+      sustain: 0.3,
+      release: 0.04,
+    }, 0.28);
   },
 
   /** Power down — descending sweep with decay. */
@@ -573,22 +570,18 @@ export const ArcadeSounds = {
       release: 0.05,
     });
     // Ascending triumph sweep
-    setTimeout(() => {
-      playSweep(200, 1000, 0.2, "sawtooth", 0.25, {
-        attack: 0.005,
-        decay: 0.05,
-        sustain: 0.5,
-        release: 0.05,
-      });
-    }, 100);
+    playSweep(200, 1000, 0.2, "sawtooth", 0.25, {
+      attack: 0.005,
+      decay: 0.05,
+      sustain: 0.5,
+      release: 0.05,
+    }, 0.1);
     // High sting
-    setTimeout(() => {
-      playTone(1200, 0.15, "square", 0.2, {
-        attack: 0.005,
-        decay: 0.05,
-        sustain: 0.3,
-        release: 0.05,
-      });
-    }, 250);
+    playTone(1200, 0.15, "square", 0.2, {
+      attack: 0.005,
+      decay: 0.05,
+      sustain: 0.3,
+      release: 0.05,
+    }, 0.25);
   },
 };

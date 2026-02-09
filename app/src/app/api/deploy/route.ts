@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
+import { writeFileSync, mkdtempSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
 import { instances, type Instance, runCommand, runCommandSilent, reconcileWithDocker, findInstanceByUserId } from "@/lib/instances";
 import { PERSONA_CONFIGS } from "@/lib/personas";
 import { configureAgentPersona } from "@/lib/agent-config";
 
 const OPENCLAW_IMAGE = "clawgent-openclaw";
+const OPENCLAW_CONFIG_PATH = "/home/node/.openclaw/openclaw.json";
 const PORT_RANGE_START = 19000;
 const CONTAINER_PREFIX = "clawgent-";
 
@@ -193,6 +197,14 @@ async function deployInstance(
     const healthy = await waitForHealth(instance, 60);
 
     if (healthy) {
+      // Step 3b: Configure gateway to accept proxy connections
+      addLog(instance, "Configuring gateway for proxy access...");
+      try {
+        await injectGatewayConfig(instance);
+      } catch {
+        addLog(instance, "Warning: gateway config injection failed (non-critical).");
+      }
+
       // Step 4b: Set the default model inside the container
       addLog(instance, `Setting default model to ${modelId}... (plugging in the brain)`);
       try {
@@ -335,6 +347,61 @@ function startPairingAutoApprover(instance: Instance) {
       // Container may not be ready yet or pending.json doesn't exist
     }
   }, POLL_INTERVAL);
+}
+
+/**
+ * Inject gateway config into the OpenClaw container so it accepts
+ * WebSocket connections from the Nginx reverse proxy.
+ *
+ * Without this, the gateway rejects connections with:
+ *   "origin not allowed (open the Control UI from the gateway host
+ *    or allow it in gateway.controlUi.allowedOrigins)"
+ */
+async function injectGatewayConfig(instance: Instance): Promise<void> {
+  // Read existing config (may have been created by gateway startup)
+  let config: Record<string, unknown> = {};
+  try {
+    const raw = await runCommandSilent("docker", [
+      "exec", instance.containerName, "cat", OPENCLAW_CONFIG_PATH,
+    ]);
+    config = JSON.parse(raw);
+  } catch {
+    // Config may not exist yet
+  }
+
+  // Set gateway config: trust Docker bridge proxy + allow clawgent.ai origin
+  const gateway = (config.gateway || {}) as Record<string, unknown>;
+  gateway.trustedProxies = ["172.17.0.0/16", "127.0.0.1"];
+
+  const controlUi = (gateway.controlUi || {}) as Record<string, unknown>;
+  controlUi.allowedOrigins = [
+    "https://clawgent.ai",
+    "http://localhost:3001",
+  ];
+  gateway.controlUi = controlUi;
+  config.gateway = gateway;
+
+  // Write config into container
+  const tmpDir = mkdtempSync(join(tmpdir(), "clawgent-gw-"));
+  try {
+    const configPath = join(tmpDir, "openclaw.json");
+    writeFileSync(configPath, JSON.stringify(config, null, 2));
+    await runCommand("docker", [
+      "cp", configPath, `${instance.containerName}:${OPENCLAW_CONFIG_PATH}`,
+    ]);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+
+  // Signal gateway to reload the config via SIGUSR1
+  // (the `gateway reload` subcommand doesn't exist in 2026.2.x)
+  try {
+    await runCommandSilent("docker", [
+      "exec", instance.containerName, "kill", "-USR1", "1",
+    ]);
+  } catch {
+    // Non-fatal: gateway will pick up config on next restart
+  }
 }
 
 async function isPortInUse(port: number): Promise<boolean> {

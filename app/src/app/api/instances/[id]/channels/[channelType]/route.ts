@@ -107,14 +107,13 @@ export async function DELETE(
       // logout may not be available — config removal is sufficient
     }
 
-    // Signal gateway to reload
+    // Signal gateway to reload via SIGUSR1
     try {
       await runCommandSilent("docker", [
-        "exec", instance.containerName,
-        "node", "/app/openclaw.mjs", "gateway", "reload",
+        "exec", instance.containerName, "kill", "-USR1", "1",
       ]);
     } catch {
-      // reload may not be available
+      // Non-fatal: gateway will pick up config on next restart
     }
 
     return NextResponse.json({

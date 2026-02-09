@@ -198,14 +198,13 @@ export async function POST(
       rmSync(tmpDir, { recursive: true, force: true });
     }
 
-    // Signal the gateway to reload config (graceful restart of channel adapters)
+    // Signal the gateway to reload config via SIGUSR1
     try {
       await runCommandSilent("docker", [
-        "exec", instance.containerName,
-        "node", "/app/openclaw.mjs", "gateway", "reload",
+        "exec", instance.containerName, "kill", "-USR1", "1",
       ]);
     } catch {
-      // reload may not be available — gateway will pick up config on next cycle
+      // Non-fatal: gateway will pick up config on next restart
     }
 
     return NextResponse.json({
