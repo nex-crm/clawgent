@@ -101,7 +101,7 @@ export async function DELETE(
     try {
       await runCommandSilent("docker", [
         "exec", instance.containerName,
-        "openclaw", "channels", "logout", "--channel", channelType, "--force",
+        "node", "/app/openclaw.mjs", "channels", "logout", "--channel", channelType, "--force",
       ]);
     } catch {
       // logout may not be available — config removal is sufficient
@@ -111,7 +111,7 @@ export async function DELETE(
     try {
       await runCommandSilent("docker", [
         "exec", instance.containerName,
-        "openclaw", "gateway", "reload",
+        "node", "/app/openclaw.mjs", "gateway", "reload",
       ]);
     } catch {
       // reload may not be available

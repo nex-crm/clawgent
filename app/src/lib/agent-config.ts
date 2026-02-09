@@ -78,7 +78,7 @@ export async function configureAgentPersona(
       try {
         await runCommand("docker", [
           "exec", instance.containerName,
-          "openclaw", "config", "set",
+          "node", "/app/openclaw.mjs", "config", "set",
           "agents.defaults.heartbeat.every", config.heartbeatInterval,
         ]);
       } catch {

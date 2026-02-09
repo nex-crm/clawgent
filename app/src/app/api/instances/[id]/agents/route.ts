@@ -69,7 +69,7 @@ export async function GET(
     try {
       const output = await runCommandSilent("docker", [
         "exec", instance.containerName,
-        "openclaw", "agents", "list", "--json",
+        "node", "/app/openclaw.mjs", "agents", "list", "--json",
       ]);
       const raw: OpenClawAgent[] = JSON.parse(output);
       agents = raw.map((a) => ({
@@ -189,7 +189,7 @@ export async function POST(
     // Step 1: Create the agent via OpenClaw CLI
     await runCommand("docker", [
       "exec", instance.containerName,
-      "openclaw", "agents", "add", agentName,
+      "node", "/app/openclaw.mjs", "agents", "add", agentName,
       "--workspace", wsPath,
       "--non-interactive", "--json",
     ]);
@@ -202,7 +202,7 @@ export async function POST(
       try {
         await runCommand("docker", [
           "exec", instance.containerName,
-          "openclaw", "agents", "set-identity",
+          "node", "/app/openclaw.mjs", "agents", "set-identity",
           "--agent", agentName,
           "--name", persona.name,
           "--emoji", persona.emoji,

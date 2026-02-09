@@ -55,7 +55,7 @@ export async function DELETE(
   try {
     await runCommand("docker", [
       "exec", instance.containerName,
-      "openclaw", "agents", "delete", agentId, "--force", "--json",
+      "node", "/app/openclaw.mjs", "agents", "delete", agentId, "--force", "--json",
     ]);
 
     return NextResponse.json({
