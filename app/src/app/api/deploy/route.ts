@@ -308,13 +308,11 @@ async function allocatePort(): Promise<number> {
 }
 
 function startPairingAutoApprover(instance: Instance) {
-  const MAX_DURATION = 5 * 60 * 1000; // 5 minutes
-  const POLL_INTERVAL = 2000;
-  const start = Date.now();
+  const POLL_INTERVAL = 5000;
 
   const interval = setInterval(async () => {
-    // Stop if instance was destroyed or timed out
-    if (!instances.has(instance.id) || Date.now() - start > MAX_DURATION) {
+    // Stop only if instance was destroyed
+    if (!instances.has(instance.id)) {
       clearInterval(interval);
       return;
     }
