@@ -1510,7 +1510,7 @@ export default function Home() {
               </a>
 
               <p className="pixel-font text-arcade-yellow text-[10px] sm:text-xs tracking-widest mx-auto leading-relaxed">
-                DEPLOY OPENCLAW UNDER A MINUTE.<br />GET IT GOING ON DAY-1 WITH PRE-BUILT AGENTS
+                Instantly deploy OpenClaw to the web.<br />Make it useful with pre-built agents.
               </p>
               <p className="pixel-font text-white/25 text-[7px] tracking-wider max-w-xs mx-auto">
                 PRE-LOADED AGENT TEMPLATES. REAL SKILLS. ONE CLICK.
