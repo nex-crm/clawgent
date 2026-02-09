@@ -1515,9 +1515,6 @@ export default function Home() {
               <h2 className="pixel-font text-arcade-yellow/70 text-[10px] sm:text-xs tracking-widest mx-auto mt-1">
                 MAKE IT USEFUL WITH PRE-BUILT AGENTS.
               </h2>
-              <p className="pixel-font text-white/25 text-[7px] tracking-wider max-w-xs mx-auto">
-                PRE-LOADED AGENT TEMPLATES. REAL SKILLS. ONE CLICK.
-              </p>
             </div>
 
             {/* ─── SNES-STYLE START MENU (unauthenticated or no instance) ─── */}
