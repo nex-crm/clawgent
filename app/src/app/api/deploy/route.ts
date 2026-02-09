@@ -4,7 +4,7 @@ import { writeFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
-import { instances, type Instance, runCommand, runCommandSilent, reconcileWithDocker, findInstanceByUserId } from "@/lib/instances";
+import { instances, type Instance, runCommand, runCommandSilent, reconcileWithDocker, findInstanceByUserId, startPairingAutoApprover } from "@/lib/instances";
 import { PERSONA_CONFIGS } from "@/lib/personas";
 import { configureAgentPersona } from "@/lib/agent-config";
 
@@ -197,51 +197,54 @@ async function deployInstance(
     const healthy = await waitForHealth(instance, 60);
 
     if (healthy) {
-      // Step 3b: Configure gateway to accept proxy connections
-      addLog(instance, "Configuring gateway for proxy access...");
-      try {
-        await injectGatewayConfig(instance);
-      } catch {
-        addLog(instance, "Warning: gateway config injection failed (non-critical).");
-      }
+      // Run gateway config, model set, and persona injection in parallel
+      addLog(instance, "Configuring instance (gateway + model + agent template)...");
 
-      // Step 4b: Set the default model inside the container
-      addLog(instance, `Setting default model to ${modelId}... (plugging in the brain)`);
-      try {
-        await runCommand("docker", [
+      const tasks: Promise<void>[] = [
+        // Gateway config: trustedProxies + allowedOrigins
+        injectGatewayConfig(instance).catch(() => {
+          addLog(instance, "Warning: gateway config injection failed (non-critical).");
+        }),
+
+        // Set default model
+        runCommand("docker", [
           "exec", instance.containerName,
           "node", "/app/openclaw.mjs", "models", "set", modelId,
-        ]);
-        addLog(instance, "Model configured. It can think now.");
-      } catch (modelErr) {
-        const msg = modelErr instanceof Error ? modelErr.message : String(modelErr);
-        addLog(instance, `Warning: failed to set model (${msg}). You may need to set it manually.`);
-      }
+        ]).then(() => {
+          addLog(instance, `Model set: ${modelId}`);
+        }).catch((modelErr) => {
+          const msg = modelErr instanceof Error ? modelErr.message : String(modelErr);
+          addLog(instance, `Warning: failed to set model (${msg}).`);
+        }),
+      ];
 
-      // Step 5: Inject agent template configuration (SOUL.md, IDENTITY.md)
+      // Persona injection (files + skills)
       if (instance.persona) {
-        addLog(instance, `Configuring agent template: ${instance.persona}... (SOUL.md + IDENTITY.md + skills)`);
         const mainWsPath = "/home/node/.openclaw/workspace";
-        await configureAgentPersona(instance, instance.persona, mainWsPath, (msg) => addLog(instance, msg));
-
-        // Set main agent identity
-        const personaConfig = PERSONA_CONFIGS[instance.persona];
-        if (personaConfig) {
-          try {
-            await runCommand("docker", [
-              "exec", instance.containerName,
-              "node", "/app/openclaw.mjs", "agents", "set-identity",
-              "--agent", "main",
-              "--name", personaConfig.name,
-              "--emoji", personaConfig.emoji,
-            ]);
-          } catch {
-            addLog(instance, "Note: agent identity command skipped (non-critical).");
-          }
-        }
-
-        addLog(instance, "Agent template loaded. Your first agent knows who it is and what it does.");
+        tasks.push(
+          configureAgentPersona(instance, instance.persona, mainWsPath, (msg) => addLog(instance, msg))
+            .then(async () => {
+              // Set agent identity (depends on persona injection finishing)
+              const personaConfig = PERSONA_CONFIGS[instance.persona!];
+              if (personaConfig) {
+                try {
+                  await runCommand("docker", [
+                    "exec", instance.containerName,
+                    "node", "/app/openclaw.mjs", "agents", "set-identity",
+                    "--agent", "main",
+                    "--name", personaConfig.name,
+                    "--emoji", personaConfig.emoji,
+                  ]);
+                } catch {
+                  addLog(instance, "Note: agent identity command skipped (non-critical).");
+                }
+              }
+              addLog(instance, "Agent template loaded.");
+            })
+        );
       }
+
+      await Promise.all(tasks);
 
       instance.status = "running";
       instance.dashboardUrl = `/i/${instance.id}/`;
@@ -284,8 +287,7 @@ async function waitForHealth(instance: Instance, timeoutSeconds: number): Promis
     } catch {
       // not ready yet
     }
-    addLog(instance, "Instance not ready yet... retrying in 2s. Patience is a virtue.");
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, 1000));
   }
 
   return false;
@@ -305,46 +307,6 @@ async function allocatePort(): Promise<number> {
   }
 
   throw new Error("No available ports in range");
-}
-
-function startPairingAutoApprover(instance: Instance) {
-  const POLL_INTERVAL = 5000;
-
-  const interval = setInterval(async () => {
-    // Stop only if instance was destroyed
-    if (!instances.has(instance.id)) {
-      clearInterval(interval);
-      return;
-    }
-
-    try {
-      const pendingJson = await runCommandSilent("docker", [
-        "exec", instance.containerName,
-        "cat", "/home/node/.openclaw/devices/pending.json",
-      ]);
-
-      const pending = JSON.parse(pendingJson);
-      const requestIds = Object.keys(pending);
-      if (requestIds.length === 0) return;
-
-      for (const requestId of requestIds) {
-        try {
-          await runCommand("docker", [
-            "exec", instance.containerName,
-            "node", "/app/openclaw.mjs", "devices", "approve", requestId,
-            "--token", instance.token,
-            "--url", "ws://127.0.0.1:18789",
-            "--timeout", "5000",
-          ]);
-          addLog(instance, `Auto-approved device pairing: ${requestId.substring(0, 8)}... (one less popup to click)`);
-        } catch {
-          // Approval may fail if request already expired or was handled
-        }
-      }
-    } catch {
-      // Container may not be ready yet or pending.json doesn't exist
-    }
-  }, POLL_INTERVAL);
 }
 
 /**

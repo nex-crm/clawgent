@@ -15,6 +15,9 @@ import { PERSONA_CONFIGS, type SkillConfig } from "./personas";
  * Inject persona files (SOUL.md, IDENTITY.md, skills, HEARTBEAT.md)
  * into an OpenClaw agent workspace inside a running container.
  *
+ * Builds the full directory tree locally and copies it in a single
+ * `docker cp` call to minimize overhead (~1 docker call instead of ~30).
+ *
  * @param instance   The running instance (provides containerName for docker exec)
  * @param personaId  Key into PERSONA_CONFIGS
  * @param wsPath     Absolute path inside the container to the agent's workspace
@@ -37,44 +40,48 @@ export async function configureAgentPersona(
   const tmpDir = mkdtempSync(join(tmpdir(), "clawgent-"));
 
   try {
-    // Ensure workspace directory exists (gateway creates it lazily)
-    await runCommand("docker", [
-      "exec", instance.containerName, "mkdir", "-p", wsPath,
-    ]);
-
-    // --- 1. SOUL.md + IDENTITY.md ---
+    // Build the full workspace tree locally
     writeFileSync(join(tmpDir, "SOUL.md"), config.soul);
     writeFileSync(join(tmpDir, "IDENTITY.md"), config.identity);
 
-    await runCommand("docker", [
-      "cp", join(tmpDir, "SOUL.md"), `${instance.containerName}:${wsPath}/SOUL.md`,
-    ]);
-    await runCommand("docker", [
-      "cp", join(tmpDir, "IDENTITY.md"), `${instance.containerName}:${wsPath}/IDENTITY.md`,
-    ]);
-
-    // Remove BOOTSTRAP.md so the agent doesn't run the first-run wizard
-    await runCommand("docker", [
-      "exec", instance.containerName, "rm", "-f", `${wsPath}/BOOTSTRAP.md`,
-    ]);
-
-    // --- 2. Skills ---
+    // Skills
     if (config.skills.length > 0) {
       log?.(`Loading ${config.skills.length} skills...`);
       for (const skill of config.skills) {
-        await installSkill(instance.containerName, tmpDir, wsPath, skill);
+        const skillDir = join(tmpDir, "skills", skill.name);
+        mkdirSync(skillDir, { recursive: true });
+        writeFileSync(join(skillDir, "SKILL.md"), buildSkillMd(skill));
       }
+    }
+
+    // Heartbeat
+    if (config.heartbeat) {
+      writeFileSync(join(tmpDir, "HEARTBEAT.md"), config.heartbeat);
+      mkdirSync(join(tmpDir, "memory"), { recursive: true });
+      writeFileSync(join(tmpDir, "memory", "heartbeat-state.json"), JSON.stringify({
+        lastChecks: {},
+        notes: "Timestamps are unix epoch. null means never checked.",
+      }, null, 2));
+    }
+
+    // Single docker call: ensure workspace exists + remove BOOTSTRAP.md
+    await runCommand("docker", [
+      "exec", instance.containerName,
+      "sh", "-c", `mkdir -p ${wsPath} && rm -f ${wsPath}/BOOTSTRAP.md`,
+    ]);
+
+    // Single docker cp: push entire tree into the workspace
+    // The trailing "/." copies contents of tmpDir into wsPath (not tmpDir itself)
+    await runCommand("docker", [
+      "cp", `${tmpDir}/.`, `${instance.containerName}:${wsPath}/`,
+    ]);
+
+    if (config.skills.length > 0) {
       log?.(`Skills loaded: ${config.skills.map(s => s.name).join(", ")}`);
     }
 
-    // --- 3. HEARTBEAT.md + heartbeat interval ---
+    // Heartbeat interval requires a CLI call (can't be file-based)
     if (config.heartbeat) {
-      writeFileSync(join(tmpDir, "HEARTBEAT.md"), config.heartbeat);
-      await runCommand("docker", [
-        "cp", join(tmpDir, "HEARTBEAT.md"), `${instance.containerName}:${wsPath}/HEARTBEAT.md`,
-      ]);
-
-      // Set heartbeat interval in openclaw.json via config CLI
       try {
         await runCommand("docker", [
           "exec", instance.containerName,
@@ -84,20 +91,6 @@ export async function configureAgentPersona(
       } catch {
         log?.("Note: heartbeat interval config skipped (non-critical).");
       }
-
-      // Create memory directory + initial heartbeat-state.json
-      await runCommand("docker", [
-        "exec", instance.containerName, "mkdir", "-p", `${wsPath}/memory`,
-      ]);
-      writeFileSync(join(tmpDir, "heartbeat-state.json"), JSON.stringify({
-        lastChecks: {},
-        notes: "Timestamps are unix epoch. null means never checked.",
-      }, null, 2));
-      await runCommand("docker", [
-        "cp", join(tmpDir, "heartbeat-state.json"),
-        `${instance.containerName}:${wsPath}/memory/heartbeat-state.json`,
-      ]);
-
       log?.(`Heartbeat configured (every ${config.heartbeatInterval}).`);
     }
   } finally {
@@ -120,25 +113,4 @@ metadata: ${JSON.stringify(metadata)}
 ---
 
 ${skill.instructions}`;
-}
-
-async function installSkill(
-  containerName: string,
-  tmpDir: string,
-  wsPath: string,
-  skill: SkillConfig,
-) {
-  const skillDir = join(tmpDir, `skill-${skill.name}`);
-  mkdirSync(skillDir, { recursive: true });
-
-  writeFileSync(join(skillDir, "SKILL.md"), buildSkillMd(skill));
-
-  // Create the skill directory in the container, then copy SKILL.md into it
-  await runCommand("docker", [
-    "exec", containerName, "mkdir", "-p", `${wsPath}/skills/${skill.name}`,
-  ]);
-  await runCommand("docker", [
-    "cp", join(skillDir, "SKILL.md"),
-    `${containerName}:${wsPath}/skills/${skill.name}/SKILL.md`,
-  ]);
 }

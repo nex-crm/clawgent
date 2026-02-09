@@ -224,6 +224,14 @@ export async function reconcileWithDocker(): Promise<void> {
       };
 
       instances.set(id, instance);
+      if (isUp && token) startPairingAutoApprover(instance);
+    }
+
+    // Ensure auto-approver is running for all active instances (survives PM2 restart)
+    for (const inst of instances.values()) {
+      if (inst.status === "running" && inst.token) {
+        startPairingAutoApprover(inst);
+      }
     }
 
     // Clean up orphaned DB records: instances in DB but not running in Docker
@@ -349,6 +357,60 @@ export function runCommandSilent(cmd: string, args: string[]): Promise<string> {
 
     proc.on("error", reject);
   });
+}
+
+// ─── Pairing Auto-Approver ───────────────────────────────────────
+// Runs in background for each active instance, approving device
+// pairing requests so browser connections work without manual approval.
+// Tracked by Set to avoid duplicates across reconciliation cycles.
+
+const activeApprovers = new Set<string>();
+
+export function startPairingAutoApprover(instance: Instance): void {
+  if (activeApprovers.has(instance.id)) return;
+  activeApprovers.add(instance.id);
+
+  const POLL_INTERVAL = 5000;
+
+  const interval = setInterval(async () => {
+    if (!instances.has(instance.id) || instances.get(instance.id)?.status !== "running") {
+      clearInterval(interval);
+      activeApprovers.delete(instance.id);
+      return;
+    }
+
+    try {
+      const pendingJson = await runCommandSilent("docker", [
+        "exec", instance.containerName,
+        "cat", "/home/node/.openclaw/devices/pending.json",
+      ]);
+
+      const pending = JSON.parse(pendingJson);
+      const requestIds = Object.keys(pending);
+      if (requestIds.length === 0) return;
+
+      for (const requestId of requestIds) {
+        try {
+          await runCommand("docker", [
+            "exec", instance.containerName,
+            "node", "/app/openclaw.mjs", "devices", "approve", requestId,
+            "--token", instance.token,
+            "--url", "ws://127.0.0.1:18789",
+            "--timeout", "5000",
+          ]);
+        } catch {
+          // Approval may fail if request already expired
+        }
+      }
+    } catch {
+      // Container not ready or pending.json doesn't exist
+    }
+  }, POLL_INTERVAL);
+
+  // Don't block process exit
+  if (interval && typeof interval === "object" && "unref" in interval) {
+    interval.unref();
+  }
 }
 
 /**
