@@ -76,11 +76,40 @@ function createPool(name: SoundName): SoundPool {
 }
 
 /**
- * Play the next available element from a pool via round-robin.
- * Resets currentTime so the same element can restart immediately.
+ * Core initialization logic. Creates all audio pools and restores
+ * mute preference. Idempotent — safe to call multiple times.
  */
-function playPool(pool: SoundPool): void {
-  if (muted || !pool.elements.length) return;
+function doInit(): void {
+  if (typeof window === "undefined") return;
+  if (initialized) return;
+
+  for (const name of SOUND_NAMES) {
+    pools[name] = createPool(name);
+  }
+
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved === "true") {
+      muted = true;
+      updateAllVolumes();
+    }
+  } catch {
+    // localStorage unavailable
+  }
+
+  initialized = true;
+}
+
+/**
+ * Lazily initialize (if needed) then play a named sound.
+ * Looks up the pool AFTER init so the first call in a session
+ * still plays (fixes the React-vs-document event ordering race).
+ */
+function playSound(name: SoundName): void {
+  if (!initialized) doInit();
+  if (muted) return;
+  const pool = pools[name];
+  if (!pool || !pool.elements.length) return;
   const audio = pool.elements[pool.index];
   pool.index = (pool.index + 1) % pool.elements.length;
   audio.currentTime = 0;
@@ -111,28 +140,12 @@ export const ArcadeSounds = {
    * Initialize audio pools. Must be called from a user interaction
    * event handler (click/keydown) to satisfy browser autoplay policy.
    * Safe to call multiple times — subsequent calls are no-ops.
+   *
+   * Note: playSound() also calls doInit() lazily, so sounds work even
+   * if initAudio() hasn't been called yet (fixes first-click race).
    */
   initAudio(): void {
-    if (typeof window === "undefined") return;
-    if (initialized) return;
-
-    // Create all pools and start preloading
-    for (const name of SOUND_NAMES) {
-      pools[name] = createPool(name);
-    }
-
-    // Restore mute preference from localStorage
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved === "true") {
-        muted = true;
-        updateAllVolumes();
-      }
-    } catch {
-      // localStorage unavailable
-    }
-
-    initialized = true;
+    doInit();
   },
 
   /** Toggle mute on/off. Returns new muted state. */
@@ -159,54 +172,46 @@ export const ArcadeSounds = {
     const now = performance.now();
     if (now - lastCursorMoveTime < THROTTLE_MS) return;
     lastCursorMoveTime = now;
-    if (!pools["cursor-move"]) return;
-    playPool(pools["cursor-move"]);
+    playSound("cursor-move");
   },
 
   /** Confirmation beep when selecting a persona — two-tone ascending. */
   select(): void {
-    if (!pools["select"]) return;
-    playPool(pools["select"]);
+    playSound("select");
   },
 
   /** Lower-pitched blip for going back. */
   back(): void {
-    if (!pools["back"]) return;
-    playPool(pools["back"]);
+    playSound("back");
   },
 
   // ─── Screen transitions ──────────────────────────────────────
 
   /** Whoosh/sweep sound for screen changes. */
   screenTransition(): void {
-    if (!pools["screen-transition"]) return;
-    playPool(pools["screen-transition"]);
+    playSound("screen-transition");
   },
 
   // ─── Deploy sequence ─────────────────────────────────────────
 
   /** Engine rev / power-up sound when deploy begins. */
   deployStart(): void {
-    if (!pools["deploy-start"]) return;
-    playPool(pools["deploy-start"]);
+    playSound("deploy-start");
   },
 
   /** Subtle tick/pulse for each log line during deploy. */
   deployProgress(): void {
-    if (!pools["deploy-progress"]) return;
-    playPool(pools["deploy-progress"]);
+    playSound("deploy-progress");
   },
 
   /** Victory fanfare — C major arpeggio. */
   deploySuccess(): void {
-    if (!pools["deploy-success"]) return;
-    playPool(pools["deploy-success"]);
+    playSound("deploy-success");
   },
 
   /** Sad trombone / error buzz — descending minor sequence. */
   deployError(): void {
-    if (!pools["deploy-error"]) return;
-    playPool(pools["deploy-error"]);
+    playSound("deploy-error");
   },
 
   // ─── Actions ─────────────────────────────────────────────────
@@ -216,55 +221,47 @@ export const ArcadeSounds = {
     const now = performance.now();
     if (now - lastButtonHoverTime < THROTTLE_MS) return;
     lastButtonHoverTime = now;
-    if (!pools["button-hover"]) return;
-    playPool(pools["button-hover"]);
+    playSound("button-hover");
   },
 
   /** Satisfying click/confirm. */
   buttonClick(): void {
-    if (!pools["button-click"]) return;
-    playPool(pools["button-click"]);
+    playSound("button-click");
   },
 
   /** Explosion/power-down sound for destroying an instance. */
   destroy(): void {
-    if (!pools["destroy"]) return;
-    playPool(pools["destroy"]);
+    playSound("destroy");
   },
 
   // ─── TTL warnings ────────────────────────────────────────────
 
   /** Urgent beep — low-health warning, 440Hz square beeping. */
   ttlWarning(): void {
-    if (!pools["ttl-warning"]) return;
-    playPool(pools["ttl-warning"]);
+    playSound("ttl-warning");
   },
 
   /** "TIME OVER" sound — descending tone. */
   ttlExpired(): void {
-    if (!pools["ttl-expired"]) return;
-    playPool(pools["ttl-expired"]);
+    playSound("ttl-expired");
   },
 
   // ─── Auth ────────────────────────────────────────────────────
 
   /** Coin insert sound — classic arcade coin-op feel. */
   signIn(): void {
-    if (!pools["sign-in"]) return;
-    playPool(pools["sign-in"]);
+    playSound("sign-in");
   },
 
   /** Power down — descending sweep with decay. */
   signOut(): void {
-    if (!pools["sign-out"]) return;
-    playPool(pools["sign-out"]);
+    playSound("sign-out");
   },
 
   // ─── Fun ─────────────────────────────────────────────────────
 
   /** Classic KO impact for when "IT'S ALIVE" shows. */
   koSound(): void {
-    if (!pools["ko"]) return;
-    playPool(pools["ko"]);
+    playSound("ko");
   },
 };
