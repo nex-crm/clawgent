@@ -2048,7 +2048,7 @@ export default function Home() {
 
 
             {/* Agent count */}
-            {systemStatus && systemStatus.runningInstances > 0 && (
+            {!authUser && systemStatus && systemStatus.runningInstances > 0 && (
               <p className="pixel-font text-arcade-green text-[9px] tracking-wide">
                 {systemStatus.runningInstances} INSTANCE
                 {systemStatus.runningInstances !== 1 ? "S" : ""} CURRENTLY
