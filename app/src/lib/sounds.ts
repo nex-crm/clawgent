@@ -21,6 +21,78 @@ let muted = false;
 const MASTER_VOLUME = 0.25; // moderate global volume
 const STORAGE_KEY = "clawgent-sound-muted";
 
+// ─── Pre-rendered buffers for rapid-fire sounds ─────────────────────
+
+let cursorMoveBuffer: AudioBuffer | null = null;
+let buttonHoverBuffer: AudioBuffer | null = null;
+let lastCursorMoveTime = 0;
+let lastButtonHoverTime = 0;
+
+const THROTTLE_MS = 40; // skip if called within 40ms of last play
+
+/**
+ * Pre-render short waveforms into AudioBuffers using OfflineAudioContext.
+ * Playing a BufferSource is far cheaper than creating oscillator+gain+envelope
+ * nodes on every call, which matters for sounds that fire dozens of times/sec.
+ */
+async function prerenderBuffers(): Promise<void> {
+  // --- cursorMove: 1200Hz square, 30ms, volume 0.2 ---
+  {
+    const duration = 0.03;
+    const sampleRate = 44100;
+    const length = Math.ceil(sampleRate * (duration + 0.05));
+    const offline = new OfflineAudioContext(1, length, sampleRate);
+
+    const osc = offline.createOscillator();
+    const gain = offline.createGain();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(1200, 0);
+    gain.gain.setValueAtTime(0, 0);
+
+    // Envelope: attack=0.002, decay=0.015, sustain=0.2, release=0.01, peak=0.2
+    const g = gain.gain;
+    g.linearRampToValueAtTime(0.2, 0.002);
+    g.linearRampToValueAtTime(0.2 * 0.2, 0.002 + 0.015);
+    g.setValueAtTime(0.2 * 0.2, duration - 0.01);
+    g.linearRampToValueAtTime(0, duration);
+
+    osc.connect(gain);
+    gain.connect(offline.destination);
+    osc.start(0);
+    osc.stop(duration + 0.05);
+
+    cursorMoveBuffer = await offline.startRendering();
+  }
+
+  // --- buttonHover: 2400Hz sine, 15ms, volume 0.08 ---
+  {
+    const duration = 0.015;
+    const sampleRate = 44100;
+    const length = Math.ceil(sampleRate * (duration + 0.05));
+    const offline = new OfflineAudioContext(1, length, sampleRate);
+
+    const osc = offline.createOscillator();
+    const gain = offline.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(2400, 0);
+    gain.gain.setValueAtTime(0, 0);
+
+    // Envelope: attack=0.001, decay=0.005, sustain=0.1, release=0.005, peak=0.08
+    const g = gain.gain;
+    g.linearRampToValueAtTime(0.08, 0.001);
+    g.linearRampToValueAtTime(0.08 * 0.1, 0.001 + 0.005);
+    g.setValueAtTime(0.08 * 0.1, duration - 0.005);
+    g.linearRampToValueAtTime(0, duration);
+
+    osc.connect(gain);
+    gain.connect(offline.destination);
+    osc.start(0);
+    osc.stop(duration + 0.05);
+
+    buttonHoverBuffer = await offline.startRendering();
+  }
+}
+
 function ensureCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
   if (!ctx) {
@@ -300,6 +372,9 @@ export const ArcadeSounds = {
     src.connect(ctx.destination);
     src.start();
 
+    // Pre-render rapid-fire sound buffers (non-blocking)
+    prerenderBuffers();
+
     // Restore mute preference from localStorage
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -337,13 +412,27 @@ export const ArcadeSounds = {
 
   /** Short blip when hovering/selecting persona grid items (SF2 cursor move). */
   cursorMove(): void {
-    // 1200Hz square wave, 30ms, quick decay
-    playTone(1200, 0.03, "square", 0.2, {
-      attack: 0.002,
-      decay: 0.015,
-      sustain: 0.2,
-      release: 0.01,
-    });
+    const now = performance.now();
+    if (now - lastCursorMoveTime < THROTTLE_MS) return;
+    lastCursorMoveTime = now;
+
+    const c = ensureCtx();
+    const m = getMaster();
+    if (!c || !m || !cursorMoveBuffer) {
+      // Buffer not yet rendered — fall back to oscillator path
+      playTone(1200, 0.03, "square", 0.2, {
+        attack: 0.002,
+        decay: 0.015,
+        sustain: 0.2,
+        release: 0.01,
+      });
+      return;
+    }
+
+    const src = c.createBufferSource();
+    src.buffer = cursorMoveBuffer;
+    src.connect(m);
+    src.start();
   },
 
   /** Confirmation beep when selecting a persona — two-tone ascending. */
@@ -444,12 +533,27 @@ export const ArcadeSounds = {
 
   /** Very subtle high-frequency tick on button hover. */
   buttonHover(): void {
-    playTone(2400, 0.015, "sine", 0.08, {
-      attack: 0.001,
-      decay: 0.005,
-      sustain: 0.1,
-      release: 0.005,
-    });
+    const now = performance.now();
+    if (now - lastButtonHoverTime < THROTTLE_MS) return;
+    lastButtonHoverTime = now;
+
+    const c = ensureCtx();
+    const m = getMaster();
+    if (!c || !m || !buttonHoverBuffer) {
+      // Buffer not yet rendered — fall back to oscillator path
+      playTone(2400, 0.015, "sine", 0.08, {
+        attack: 0.001,
+        decay: 0.005,
+        sustain: 0.1,
+        release: 0.005,
+      });
+      return;
+    }
+
+    const src = c.createBufferSource();
+    src.buffer = buttonHoverBuffer;
+    src.connect(m);
+    src.start();
   },
 
   /** Satisfying click/confirm. */
