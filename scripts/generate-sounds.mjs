@@ -320,8 +320,8 @@ function writeWav(filePath, buf) {
   out.writeUInt16LE(1, 22); // mono
   out.writeUInt32LE(SAMPLE_RATE, 24);
   out.writeUInt32LE(byteRate, 28);
-  out.writeUInt16LE(blockAlign, 30);
-  out.writeUInt16LE(bitsPerSample, 32);
+  out.writeUInt16LE(blockAlign, 32);
+  out.writeUInt16LE(bitsPerSample, 34);
 
   // data chunk
   out.write("data", 36);
