@@ -497,10 +497,40 @@ body::after {
  * Fixed top-right Discord invite link. Matches mute button style
  * but subtler — utility link, not a CTA.
  */
-.discord-link {
+.github-link {
   position: fixed;
   top: 12px;
   right: 56px;
+  z-index: 10000;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  border: 2px solid var(--arcade-border-color);
+  color: rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  padding: 0;
+  border-radius: 0;
+  text-decoration: none;
+}
+
+.github-link:hover {
+  border-color: #fff;
+  background: rgba(0, 0, 0, 0.8);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.github-link:active {
+  transform: scale(0.92);
+}
+
+.discord-link {
+  position: fixed;
+  top: 12px;
+  right: 100px;
   z-index: 10000;
   width: 36px;
   height: 36px;
