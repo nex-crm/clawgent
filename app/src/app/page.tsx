@@ -1534,7 +1534,7 @@ export default function Home() {
                     <span className="start-menu-arrow-spacer" aria-hidden="true" />
                   )}
                   <span className="pixel-font text-[10px] sm:text-xs tracking-wider">
-                    {signingIn ? "HOLD TIGHT..." : "DEPLOY OPENCLAW IN A MIN"}
+                    {signingIn ? "HOLD TIGHT..." : "DEPLOY OPENCLAW NOW"}
                   </span>
                 </button>
 
