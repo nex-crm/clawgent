@@ -247,7 +247,6 @@ export default function Home() {
   const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
   const [hoveredPersona, setHoveredPersona] = useState<Persona | null>(null);
   const [gridIndex, setGridIndex] = useState(0); // 0-8 for 3x3 grid keyboard nav
-  const [expandedSkill, setExpandedSkill] = useState<string | null>(null);
   const [selectedProvider, setSelectedProvider] =
     useState<Provider>("anthropic");
   const [apiKey, setApiKey] = useState("");
@@ -925,12 +924,6 @@ export default function Home() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [screen, gridIndex, playCursorMove]);
-
-  // ─── Persona lookup helper ────────────────────────────────────
-
-  function getPersonaById(id: string | undefined): Persona | undefined {
-    return PERSONAS.find((p) => p.id === id);
-  }
 
   // ─── Shared Persona Icon (sprite or emoji fallback) ───────────
 
@@ -2027,7 +2020,7 @@ export default function Home() {
                       ArcadeSounds.buttonClick();
                       setSetupChannels((prev) =>
                         prev.slack
-                          ? (() => { const { slack: _, ...rest } = prev; return rest; })()
+                          ? (() => { const { slack: _slack, ...rest } = prev; return rest; })()
                           : { ...prev, slack: { appToken: "", botToken: "", userToken: "" } }
                       );
                     }}
@@ -2112,7 +2105,7 @@ export default function Home() {
                       ArcadeSounds.buttonClick();
                       setSetupChannels((prev) =>
                         prev.telegram
-                          ? (() => { const { telegram: _, ...rest } = prev; return rest; })()
+                          ? (() => { const { telegram: _telegram, ...rest } = prev; return rest; })()
                           : { ...prev, telegram: { botToken: "" } }
                       );
                     }}
@@ -2165,7 +2158,7 @@ export default function Home() {
                       ArcadeSounds.buttonClick();
                       setSetupChannels((prev) =>
                         prev.discord
-                          ? (() => { const { discord: _, ...rest } = prev; return rest; })()
+                          ? (() => { const { discord: _discord, ...rest } = prev; return rest; })()
                           : { ...prev, discord: { token: "" } }
                       );
                     }}

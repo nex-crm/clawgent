@@ -45,7 +45,6 @@ const ADD_AGENT_PERSONA = "marketing-pro";
 
 // Timeouts
 const DEPLOY_TIMEOUT_MS = 120_000; // 2 min for container startup + health
-const AGENT_OP_TIMEOUT_MS = 30_000; // 30s for agent add/delete
 const WS_PAIRING_TIMEOUT_MS = 30_000; // 30s for WebSocket auto-pairing
 
 // Dev-mode expected user
@@ -741,9 +740,6 @@ async function testDashboardUI(instanceId, browser) {
   }
 
   // Check localStorage for successful pairing
-  const deviceAuth = await page.evaluate(() =>
-    localStorage.getItem("openclaw.device.auth.v1"),
-  );
   const settings = await page.evaluate(() =>
     localStorage.getItem("openclaw.control.settings.v1"),
   );
