@@ -21,9 +21,15 @@ let muted = false;
 const MASTER_VOLUME = 0.25; // moderate global volume
 const STORAGE_KEY = "clawgent-sound-muted";
 
-function getCtx(): AudioContext | null {
+function ensureCtx(): AudioContext | null {
   if (typeof window === "undefined") return null;
-  if (!ctx) return null;
+  if (!ctx) {
+    // Lazy-init on first sound call (must be inside a user gesture)
+    ArcadeSounds.initAudio();
+  }
+  if (ctx && ctx.state === "suspended") {
+    ctx.resume();
+  }
   return ctx;
 }
 
@@ -73,7 +79,7 @@ function playTone(
   volume: number = 0.5,
   envelope?: EnvelopeOpts
 ): void {
-  const c = getCtx();
+  const c = ensureCtx();
   const m = getMaster();
   if (!c || !m) return;
 
@@ -104,7 +110,7 @@ function playSweep(
   volume: number = 0.4,
   envelope?: EnvelopeOpts
 ): void {
-  const c = getCtx();
+  const c = ensureCtx();
   const m = getMaster();
   if (!c || !m) return;
 
@@ -137,7 +143,7 @@ function playNoise(
   filterFreq?: number,
   filterType: BiquadFilterType = "bandpass"
 ): void {
-  const c = getCtx();
+  const c = ensureCtx();
   const m = getMaster();
   if (!c || !m) return;
 
@@ -180,7 +186,7 @@ function playNoiseSweep(
   freqEnd: number,
   volume: number = 0.3
 ): void {
-  const c = getCtx();
+  const c = ensureCtx();
   const m = getMaster();
   if (!c || !m) return;
 
@@ -226,7 +232,7 @@ function playArpeggio(
   type: OscillatorType = "square",
   volume: number = 0.35
 ): void {
-  const c = getCtx();
+  const c = ensureCtx();
   const m = getMaster();
   if (!c || !m) return;
 
@@ -293,7 +299,7 @@ export const ArcadeSounds = {
   toggleMute(): boolean {
     muted = !muted;
     const m = getMaster();
-    const c = getCtx();
+    const c = ensureCtx();
     if (m && c) {
       m.gain.setValueAtTime(muted ? 0 : MASTER_VOLUME, c.currentTime);
     }
@@ -325,7 +331,7 @@ export const ArcadeSounds = {
 
   /** Confirmation beep when selecting a persona — two-tone ascending. */
   select(): void {
-    const c = getCtx();
+    const c = ensureCtx();
     if (!c) return;
     // 800Hz -> 1200Hz, two quick tones
     playTone(800, 0.06, "square", 0.3, {
