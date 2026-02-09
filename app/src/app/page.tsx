@@ -136,37 +136,35 @@ const PERSONAS: Persona[] = [
 
 // ─── Provider Config ────────────────────────────────────────────────
 
-type Provider = "anthropic" | "google" | "openai" | "nex";
+type Provider = "anthropic" | "google" | "openai";
 
 const PROVIDERS: {
   value: Provider;
   label: string;
   shortLabel: string;
   model: string;
+  keyUrl?: string;
 }[] = [
   {
     value: "anthropic",
     label: "Claude Sonnet 4.5",
     shortLabel: "CLAUDE",
     model: "anthropic/claude-sonnet-4-5",
+    keyUrl: "https://console.anthropic.com/settings/keys",
   },
   {
     value: "google",
     label: "Gemini 3 Flash",
     shortLabel: "GEMINI",
     model: "google/gemini-3-flash-preview",
+    keyUrl: "https://aistudio.google.com/apikey",
   },
   {
     value: "openai",
     label: "GPT-5.2",
     shortLabel: "GPT",
     model: "openai/gpt-5.2",
-  },
-  {
-    value: "nex",
-    label: "Free via Nex.ai",
-    shortLabel: "FREE",
-    model: "openai/gemini-2.5-flash",
+    keyUrl: "https://platform.openai.com/api-keys",
   },
 ];
 
@@ -582,7 +580,7 @@ export default function Home() {
   // Clicking the same pinned cell again triggers the action (deploy/select).
   const [pinnedPersona, setPinnedPersona] = useState<Persona | null>(null);
   const [selectedProvider, setSelectedProvider] =
-    useState<Provider>("nex");
+    useState<Provider>("anthropic");
   const [apiKey, setApiKey] = useState("");
 
   // Channel integrations (power-ups)
@@ -1012,7 +1010,7 @@ export default function Home() {
     ArcadeSounds.select();
     setSelectedPersona(persona);
     setPinnedPersona(null);
-    setSelectedProvider(persona.recommendedModel);
+    setSelectedProvider("anthropic");
     setScreen("apikey");
     ArcadeSounds.screenTransition();
   }
@@ -1021,13 +1019,13 @@ export default function Home() {
     ArcadeSounds.select();
     setSelectedPersona(null);
     setPinnedPersona(null);
-    setSelectedProvider("nex");
+    setSelectedProvider("anthropic");
     setScreen("apikey");
     ArcadeSounds.screenTransition();
   }
 
   async function handleLaunch() {
-    if (selectedProvider !== "nex" && !apiKey.trim()) return;
+    if (!apiKey.trim()) return;
 
     ArcadeSounds.deployStart();
 
@@ -1050,7 +1048,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider: selectedProvider,
-          apiKey: selectedProvider === "nex" ? "" : apiKey.trim(),
+          apiKey: apiKey.trim(),
           ...(selectedPersona ? { persona: selectedPersona.id } : {}),
           ...(Object.keys(setupChannels).length > 0 ? { channels: setupChannels } : {}),
         }),
@@ -2140,97 +2138,27 @@ export default function Home() {
             )}
 
             {/* Provider Selector */}
-            <div className="flex flex-col gap-2">
-              {/* Free tier — full-width primary option */}
-              <button
-                onClick={() => setSelectedProvider("nex")}
-                className={`
-                  w-full pixel-font text-[9px] sm:text-[10px] py-3 px-2 cursor-pointer
-                  ${
-                    selectedProvider === "nex"
-                      ? "bg-arcade-green text-black border-2 border-arcade-green"
-                      : "arcade-panel text-arcade-green/70 hover:text-arcade-green"
-                  }
-                `}
-              >
-                FREE via Nex.ai
-              </button>
-              {/* BYOK providers — 3-column row */}
-              <div className="grid grid-cols-3 gap-2">
-                {PROVIDERS.filter((p) => p.value !== "nex").map((p) => (
-                  <button
-                    key={p.value}
-                    onClick={() => setSelectedProvider(p.value)}
-                    className={`
-                      pixel-font text-[8px] sm:text-[9px] py-3 px-2 cursor-pointer
-                      ${
-                        selectedProvider === p.value
-                          ? "bg-arcade-green text-black border-2 border-arcade-green"
-                          : "arcade-panel text-white/60 hover:text-white/80"
-                      }
-                    `}
-                  >
-                    {p.shortLabel}
-                  </button>
-                ))}
-              </div>
+            <div className="grid grid-cols-3 gap-2">
+              {PROVIDERS.map((p) => (
+                <button
+                  key={p.value}
+                  onClick={() => setSelectedProvider(p.value)}
+                  className={`
+                    pixel-font text-[8px] sm:text-[9px] py-3 px-2 cursor-pointer
+                    ${
+                      selectedProvider === p.value
+                        ? "bg-arcade-green text-black border-2 border-arcade-green"
+                        : "arcade-panel text-white/60 hover:text-white/80"
+                    }
+                  `}
+                >
+                  {p.shortLabel}
+                </button>
+              ))}
             </div>
 
-            {selectedProvider === "nex" ? (
-              <>
-                {/* Nex free tier info */}
-                <div className="arcade-panel p-5 text-center space-y-3">
-                  <p className="pixel-font text-arcade-green text-[11px] tracking-wider">
-                    FREE TIER — POWERED BY NEX.AI
-                  </p>
-                  <p className="pixel-font text-white/50 text-[8px] tracking-wider">
-                    GEMINI 2.5 FLASH · 200 CALLS/DAY · NO API KEY NEEDED
-                  </p>
-                  <a
-                    href="https://trust.nex.ai"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-block pixel-font text-[7px] px-3 py-1 border border-arcade-green/40 text-arcade-green/70 hover:text-arcade-green hover:border-arcade-green transition-colors"
-                  >
-                    SOC2 COMPLIANT ↗
-                  </a>
-                </div>
-
-                {/* Actions */}
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => {
-                      if (SHOW_INTEGRATIONS) {
-                        ArcadeSounds.select();
-                        ArcadeSounds.screenTransition();
-                        setScreen("powerups");
-                      } else {
-                        handleLaunch();
-                      }
-                    }}
-                    onMouseEnter={() => ArcadeSounds.buttonHover()}
-                    className="flex-1 pixel-font text-[10px] sm:text-xs py-4 transition-all duration-200 cursor-pointer bg-arcade-green text-black border-2 border-arcade-green hover:shadow-[0_0_16px_var(--arcade-green)] hover:scale-[1.02] active:scale-95"
-                  >
-                    {SHOW_INTEGRATIONS ? "NEXT" : "DEPLOY"}
-                  </button>
-                  <button
-                    onClick={() => {
-                      ArcadeSounds.back();
-                      ArcadeSounds.screenTransition();
-                      setScreen("select");
-                      setApiKey("");
-                    }}
-                    onMouseEnter={() => ArcadeSounds.buttonHover()}
-                    className="arcade-btn text-arcade-pink px-6"
-                    style={{ borderColor: "var(--arcade-pink)" }}
-                  >
-                    BACK
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                {/* API Key Input */}
+            <>
+              {/* API Key Input */}
                 <input
                   type="password"
                   value={apiKey}
@@ -2250,6 +2178,23 @@ export default function Home() {
                   className="arcade-input w-full py-3 px-4 text-sm"
                   autoFocus
                 />
+
+                {/* API key help link */}
+                {(() => {
+                  const provider = PROVIDERS.find(
+                    (p) => p.value === selectedProvider
+                  );
+                  return provider?.keyUrl ? (
+                    <a
+                      href={provider.keyUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="pixel-font text-[7px] text-white/30 hover:text-arcade-green transition-colors tracking-wider"
+                    >
+                      GET YOUR {provider.shortLabel} API KEY &rarr;
+                    </a>
+                  ) : null;
+                })()}
 
                 {/* Actions */}
                 <div className="flex gap-3">
@@ -2292,7 +2237,6 @@ export default function Home() {
                   </button>
                 </div>
               </>
-            )}
           </div>
         )}
 

@@ -4,7 +4,6 @@ import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
 import { instances, type Instance, runCommand, runCommandSilent, reconcileWithDocker, findInstanceByUserId } from "@/lib/instances";
 import { PERSONA_CONFIGS } from "@/lib/personas";
 import { configureAgentPersona } from "@/lib/agent-config";
-import { checkRateLimit } from "@/lib/rate-limit";
 
 const OPENCLAW_IMAGE = "clawgent-openclaw";
 const PORT_RANGE_START = 19000;
@@ -14,7 +13,6 @@ const PROVIDER_CONFIG: Record<string, { envVar: string; modelId: string }> = {
   anthropic: { envVar: "ANTHROPIC_API_KEY", modelId: "anthropic/claude-sonnet-4-5" },
   google:    { envVar: "GEMINI_API_KEY",    modelId: "google/gemini-3-flash-preview" },
   openai:    { envVar: "OPENAI_API_KEY",    modelId: "openai/gpt-5.2" },
-  nex:       { envVar: "NEX_SHARED_GEMINI_KEY", modelId: "openai/gemini-2.5-flash" },
 };
 
 export async function POST(request: NextRequest) {
@@ -64,50 +62,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Determine the actual API key and any extra env vars for the container
-    let resolvedApiKey: string;
-    const extraEnvVars: Record<string, string> = {};
-
-    if (provider === "nex") {
-      // Free Nex tier: container talks to our LLM proxy, not directly to Gemini.
-      // The proxy validates the instance token and injects the real Gemini key.
-      // No real API key is ever given to the container.
-      // Verify the server has NEX_SHARED_GEMINI_KEY configured (used by the LLM proxy, not the container)
-      if (!process.env.NEX_SHARED_GEMINI_KEY) {
-        return NextResponse.json(
-          { error: "Free tier is not configured on this server (NEX_SHARED_GEMINI_KEY missing)" },
-          { status: 503 },
-        );
-      }
-
-      const { allowed, remaining } = checkRateLimit(userId);
-      if (!allowed) {
-        return NextResponse.json(
-          { error: "Daily free tier limit reached (200 calls/day). Try again tomorrow or use your own API key.", remaining },
-          { status: 429 },
-        );
-      }
-
-      // resolvedApiKey is unused for nex — the proxy handles the real key
-      resolvedApiKey = "proxy-managed";
-      // Point OpenClaw's OpenAI SDK at our LLM proxy on the host
-      extraEnvVars["OPENAI_BASE_URL"] = "http://host.docker.internal:3001/api/llm-proxy/v1";
-      extraEnvVars["OPENAI_API_KEY"] = "placeholder"; // will be replaced with instance.token after ID is generated
-    } else {
-      // BYOK providers require an API key
-      if (!apiKey) {
-        return NextResponse.json(
-          { error: "apiKey is required for this provider" },
-          { status: 400 },
-        );
-      }
-      resolvedApiKey = apiKey;
+    // BYOK providers require an API key
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "apiKey is required for this provider" },
+        { status: 400 },
+      );
     }
 
     // Allocate a unique port
     const port = await allocatePort();
     const token = randomBytes(16).toString("hex");
-    const id = randomBytes(4).toString("hex");
+    const id = randomBytes(12).toString("hex");
     const containerName = `${CONTAINER_PREFIX}${id}`;
     const volumeName = `${CONTAINER_PREFIX}data-${id}`;
 
@@ -129,16 +95,11 @@ export async function POST(request: NextRequest) {
 
     instances.set(id, instance);
 
-    // For nex provider: now that we have the instance token, set it as the proxy auth key
-    if (provider === "nex") {
-      extraEnvVars["OPENAI_API_KEY"] = instance.token;
-    }
-
     addLog(instance, "Spinning up a fresh OpenClaw instance. One sec.");
     if (persona) addLog(instance, `Pre-loading agent template: ${persona}. Skills included.`);
 
     // Run deployment asynchronously
-    deployInstance(instance, volumeName, config.envVar, resolvedApiKey, config.modelId, extraEnvVars).catch((err) => {
+    deployInstance(instance, volumeName, config.envVar, apiKey, config.modelId).catch((err) => {
       instance.status = "error";
       addLog(instance, `Fatal error: ${err.message}`);
     });
@@ -149,7 +110,7 @@ export async function POST(request: NextRequest) {
       message: `Deployment started. Poll GET /api/instances/${id} for progress.`,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = sanitizeMessage(err instanceof Error ? err.message : String(err));
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
@@ -168,9 +129,18 @@ export async function GET() {
   return NextResponse.json({ instances: list });
 }
 
+/** Strip known API key patterns from error messages (defense-in-depth). */
+function sanitizeMessage(msg: string): string {
+  return msg
+    .replace(/\bsk-ant-[A-Za-z0-9_-]{10,}/g, "sk-ant-***")
+    .replace(/\bsk-[A-Za-z0-9_-]{20,}/g, "sk-***")
+    .replace(/\bAIza[A-Za-z0-9_-]{30,}/g, "AIza***")
+    .replace(/\bkey-[A-Za-z0-9_-]{20,}/g, "key-***");
+}
+
 function addLog(instance: Instance, message: string) {
   const timestamp = new Date().toISOString().split("T")[1].split(".")[0];
-  instance.logs.push(`[${timestamp}] ${message}`);
+  instance.logs.push(`[${timestamp}] ${sanitizeMessage(message)}`);
 }
 
 async function deployInstance(
@@ -179,7 +149,6 @@ async function deployInstance(
   apiKeyEnvVar: string,
   apiKey: string,
   modelId: string,
-  extraEnvVars: Record<string, string> = {},
 ) {
   try {
     // Step 1: Pull image if needed
@@ -188,27 +157,16 @@ async function deployInstance(
 
     // Step 2: Create and start container
     addLog(instance, `Starting instance on port ${instance.port}... (it gets its own sandbox, very fancy)`);
-    const isNexProvider = instance.provider === "nex";
     const dockerArgs = [
       "run", "-d",
       "--name", instance.containerName,
+      "--pids-limit", "256",
       "-p", `${instance.port}:18789`,
       "-v", `${volumeName}:/home/node/.openclaw`,
       "-e", `OPENCLAW_GATEWAY_TOKEN=${instance.token}`,
       "-e", "PORT=18789",
+      "-e", `${apiKeyEnvVar}=${apiKey}`,
     ];
-    // For BYOK providers, inject API key as env var (user's own key, they know it)
-    // For nex (free tier), the LLM proxy handles API keys — container only gets proxy URL + instance token
-    if (!isNexProvider) {
-      dockerArgs.push("-e", `${apiKeyEnvVar}=${apiKey}`);
-    }
-    // Nex containers need to reach the host's LLM proxy via host.docker.internal
-    if (isNexProvider) {
-      dockerArgs.push("--add-host", "host.docker.internal:host-gateway");
-    }
-    for (const [key, value] of Object.entries(extraEnvVars)) {
-      dockerArgs.push("-e", `${key}=${value}`);
-    }
     dockerArgs.push(
       "--restart", "unless-stopped",
       OPENCLAW_IMAGE,
@@ -223,10 +181,6 @@ async function deployInstance(
     const healthy = await waitForHealth(instance, 60);
 
     if (healthy) {
-      // Step 4a: For nex (free tier), no API key injection needed — the LLM proxy
-      // handles auth. Container only has OPENAI_BASE_URL pointing to our proxy
-      // and OPENAI_API_KEY set to the instance token for proxy authentication.
-
       // Step 4b: Set the default model inside the container
       addLog(instance, `Setting default model to ${modelId}... (plugging in the brain)`);
       try {

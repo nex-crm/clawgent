@@ -48,7 +48,6 @@ export async function GET() {
       ? {
           id: instance.id,
           status: instance.status,
-          port: instance.port,
           dashboardUrl: instance.dashboardUrl,
           createdAt: instance.createdAt,
           persona: instance.persona,
