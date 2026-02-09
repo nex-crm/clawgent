@@ -44,7 +44,7 @@ export async function GET(
     try {
       const statusOutput = await runCommandSilent("docker", [
         "exec", instance.containerName,
-        "openclaw", "channels", "status", "--json",
+        "node", "/app/openclaw.mjs", "channels", "status", "--json",
       ]);
       channelStatuses = JSON.parse(statusOutput);
     } catch {
@@ -202,7 +202,7 @@ export async function POST(
     try {
       await runCommandSilent("docker", [
         "exec", instance.containerName,
-        "openclaw", "gateway", "reload",
+        "node", "/app/openclaw.mjs", "gateway", "reload",
       ]);
     } catch {
       // reload may not be available — gateway will pick up config on next cycle

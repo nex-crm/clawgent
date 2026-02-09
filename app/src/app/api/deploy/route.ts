@@ -170,10 +170,22 @@ async function deployInstance(
     dockerArgs.push(
       "--restart", "unless-stopped",
       OPENCLAW_IMAGE,
-      "bash", "-lc",
-      "openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan",
+      "node", "openclaw.mjs", "gateway",
+      "--port", "18789", "--allow-unconfigured", "--bind", "lan",
     );
     await runCommand("docker", dockerArgs);
+
+    // Fix volume ownership: Docker volumes are created as root,
+    // but the official OpenClaw image runs as `node` (uid 1000).
+    try {
+      await runCommand("docker", [
+        "exec", "-u", "root", instance.containerName,
+        "chown", "-R", "node:node", "/home/node/.openclaw",
+      ]);
+    } catch {
+      // Non-fatal: gateway may still work, but canvas/cron could fail
+    }
+
     addLog(instance, "Instance is up. Now we wait for it to get its act together.");
 
     // Step 3: Wait for gateway to become healthy
@@ -186,7 +198,7 @@ async function deployInstance(
       try {
         await runCommand("docker", [
           "exec", instance.containerName,
-          "openclaw", "models", "set", modelId,
+          "node", "/app/openclaw.mjs", "models", "set", modelId,
         ]);
         addLog(instance, "Model configured. It can think now.");
       } catch (modelErr) {
@@ -206,7 +218,7 @@ async function deployInstance(
           try {
             await runCommand("docker", [
               "exec", instance.containerName,
-              "openclaw", "agents", "set-identity",
+              "node", "/app/openclaw.mjs", "agents", "set-identity",
               "--agent", "main",
               "--name", personaConfig.name,
               "--emoji", personaConfig.emoji,
@@ -309,7 +321,7 @@ function startPairingAutoApprover(instance: Instance) {
         try {
           await runCommand("docker", [
             "exec", instance.containerName,
-            "openclaw", "devices", "approve", requestId,
+            "node", "/app/openclaw.mjs", "devices", "approve", requestId,
             "--token", instance.token,
             "--url", "ws://127.0.0.1:18789",
             "--timeout", "5000",
