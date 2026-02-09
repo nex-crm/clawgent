@@ -26,7 +26,6 @@ export async function GET() {
     instances: runningInstances.map((i) => ({
       id: i.id,
       status: i.status,
-      port: i.port,
       dashboardUrl: i.dashboardUrl,
       createdAt: i.createdAt,
       persona: i.persona,

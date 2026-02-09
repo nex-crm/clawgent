@@ -7,6 +7,7 @@ import {
   dbCount,
   dbGetAllIds,
   dbGetInstanceByUserIdActive,
+  dbGetInstanceByTokenActive,
   dbGetOrphanedInstances,
   dbDeleteOldStaleInstances,
 } from "./db";
@@ -316,6 +317,16 @@ export function findInstanceByUserId(userId: string): Instance | undefined {
   }
   // Also check DB directly for active instances only
   return dbGetInstanceByUserIdActive(userId);
+}
+
+/** Find an active instance by its gateway token. Used by LLM proxy to validate requests. */
+export function findInstanceByToken(token: string): Instance | undefined {
+  // Check cache first, only return running/starting instances
+  for (const inst of instances.values()) {
+    if (inst.token === token && (inst.status === "running" || inst.status === "starting")) return inst;
+  }
+  // Fall back to DB
+  return dbGetInstanceByTokenActive(token);
 }
 
 export function runCommandSilent(cmd: string, args: string[]): Promise<string> {

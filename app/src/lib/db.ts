@@ -34,6 +34,7 @@ if (!g.__clawgent_db) {
 
     CREATE INDEX IF NOT EXISTS idx_instances_userId ON instances(userId);
     CREATE INDEX IF NOT EXISTS idx_instances_status ON instances(status);
+    CREATE INDEX IF NOT EXISTS idx_instances_token ON instances(token);
 
     CREATE TABLE IF NOT EXISTS usage_tracking (
       userId    TEXT NOT NULL,
@@ -76,6 +77,7 @@ const stmtUpsert = db.prepare(`
 const stmtGetById = db.prepare("SELECT * FROM instances WHERE id = ?");
 const stmtGetByUserId = db.prepare("SELECT * FROM instances WHERE userId = ? LIMIT 1");
 const stmtGetByUserIdActive = db.prepare("SELECT * FROM instances WHERE userId = ? AND status IN ('running', 'starting') LIMIT 1");
+const stmtGetByTokenActive = db.prepare("SELECT * FROM instances WHERE token = ? AND status IN ('running', 'starting') LIMIT 1");
 const stmtGetOrphaned = db.prepare("SELECT * FROM instances WHERE status IN ('error', 'stopped')");
 const stmtDeleteOldStale = db.prepare("DELETE FROM instances WHERE status IN ('error', 'stopped') AND createdAt < ?");
 const stmtGetAll = db.prepare("SELECT * FROM instances");
@@ -130,6 +132,11 @@ export function dbGetInstanceByUserId(userId: string): Instance | undefined {
 
 export function dbGetInstanceByUserIdActive(userId: string): Instance | undefined {
   const row = stmtGetByUserIdActive.get(userId) as Record<string, unknown> | undefined;
+  return row ? rowToInstance(row) : undefined;
+}
+
+export function dbGetInstanceByTokenActive(token: string): Instance | undefined {
+  const row = stmtGetByTokenActive.get(token) as Record<string, unknown> | undefined;
   return row ? rowToInstance(row) : undefined;
 }
 
