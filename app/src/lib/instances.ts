@@ -370,11 +370,12 @@ export function startPairingAutoApprover(instance: Instance): void {
   if (activeApprovers.has(instance.id)) return;
   activeApprovers.add(instance.id);
 
-  const POLL_INTERVAL = 5000;
+  const start = Date.now();
+  const FAST_INTERVAL = 1000;  // 1s for first 30s
+  const SLOW_INTERVAL = 5000;  // 5s after
 
-  const interval = setInterval(async () => {
+  async function checkAndApprove(): Promise<void> {
     if (!instances.has(instance.id) || instances.get(instance.id)?.status !== "running") {
-      clearInterval(interval);
       activeApprovers.delete(instance.id);
       return;
     }
@@ -387,7 +388,6 @@ export function startPairingAutoApprover(instance: Instance): void {
 
       const pending = JSON.parse(pendingJson);
       const requestIds = Object.keys(pending);
-      if (requestIds.length === 0) return;
 
       for (const requestId of requestIds) {
         try {
@@ -405,12 +405,16 @@ export function startPairingAutoApprover(instance: Instance): void {
     } catch {
       // Container not ready or pending.json doesn't exist
     }
-  }, POLL_INTERVAL);
 
-  // Don't block process exit
-  if (interval && typeof interval === "object" && "unref" in interval) {
-    interval.unref();
+    // Schedule next check (fast for first 30s, then slow)
+    if (!activeApprovers.has(instance.id)) return;
+    const delay = Date.now() - start < 30000 ? FAST_INTERVAL : SLOW_INTERVAL;
+    const timer = setTimeout(checkAndApprove, delay);
+    if (timer && typeof timer === "object" && "unref" in timer) timer.unref();
   }
+
+  // Run first check immediately
+  checkAndApprove();
 }
 
 /**

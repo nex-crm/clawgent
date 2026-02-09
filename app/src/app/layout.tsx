@@ -55,6 +55,12 @@ export default async function RootLayout({
 
   return (
     <html lang="en">
+      <head>
+        {/* Preload sprite images so they appear instantly on the character grid */}
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => (
+          <link key={n} rel="preload" as="image" href={`/sprites/character-${n}.png`} />
+        ))}
+      </head>
       <body className={`${arcadeFont.variable} ${inter.variable} antialiased`}>
         {content}
       </body>

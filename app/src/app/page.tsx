@@ -245,6 +245,8 @@ function PersonaIcon({ persona, size = "cell" }: { persona: Persona; size?: "cel
           src={persona.sprite}
           alt={persona.name}
           className="sf2-cell-sprite"
+          loading="eager"
+          fetchPriority="high"
           draggable={false}
         />
       );
