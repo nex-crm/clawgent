@@ -14,10 +14,24 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "CLAWGENT — Deploy AI Agents",
+  title: "Clawgent — Deploy AI Agents in 60 Seconds",
   description:
-    "Deploy AI agents in seconds. Pick your persona, enter your API key, and launch.",
+    "One-click OpenClaw instances pre-loaded with agent templates. Real skills. Retro vibes.",
   keywords: "Clawgent,OpenClaw,deploy,AI,agent,persona",
+  openGraph: {
+    title: "Clawgent — Deploy AI Agents in 60 Seconds",
+    description:
+      "One-click OpenClaw instances pre-loaded with agent templates. Real skills. Retro vibes.",
+    url: "https://clawgent.ai",
+    siteName: "Clawgent",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Clawgent — Deploy AI Agents in 60 Seconds",
+    description:
+      "Pre-loaded AI agents. One click. Retro arcade vibes.",
+  },
 };
 
 const workosConfigured =

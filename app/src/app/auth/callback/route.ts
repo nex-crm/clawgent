@@ -9,7 +9,10 @@ const isWorkOSConfigured =
 export async function GET(req: NextRequest) {
   if (isWorkOSConfigured) {
     const { handleAuth } = await import("@workos-inc/authkit-nextjs");
-    const handler = handleAuth({ returnPathname: "/" });
+    const proto = req.headers.get("x-forwarded-proto") || "http";
+    const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "localhost:3001";
+    const baseURL = `${proto}://${host}`;
+    const handler = handleAuth({ returnPathname: "/", baseURL });
     return handler(req);
   }
   return NextResponse.redirect(new URL("/", req.url));

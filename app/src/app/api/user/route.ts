@@ -30,7 +30,7 @@ export async function GET() {
     userId = DEV_USER_ID;
     userInfo = {
       id: DEV_USER_ID,
-      email: "dev@localhost",
+      email: "",
       firstName: "Dev",
       lastName: "User",
       profilePictureUrl: null,

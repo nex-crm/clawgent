@@ -167,8 +167,9 @@ export async function reconcileWithDocker(): Promise<void> {
   if (reconciling) return;
   reconciling = true;
   try {
+    // Only reconcile RUNNING containers to avoid race conditions with destroyed containers
     const output = await runCommandSilent("docker", [
-      "ps", "-a",
+      "ps",  // Changed from "ps -a" to only show running containers
       "--filter", `name=${CONTAINER_PREFIX}`,
       "--format", "{{.Names}}\t{{.Status}}\t{{.Ports}}",
     ]);
@@ -181,7 +182,8 @@ export async function reconcileWithDocker(): Promise<void> {
       if (!name?.startsWith(CONTAINER_PREFIX)) continue;
 
       const id = name.replace(CONTAINER_PREFIX, "");
-      if (knownIds.has(id)) continue; // already tracked
+      // Skip if already tracked in memory OR in database (don't overwrite existing records)
+      if (knownIds.has(id) || dbGetInstance(id)) continue;
 
       // Parse port from docker output like "0.0.0.0:19000->18789/tcp"
       let port = 0;

@@ -1,0 +1,251 @@
+name: CD
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: cd-production
+  cancel-in-progress: false
+
+jobs:
+  ci-check:
+    name: Lint & Build Gate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+  deploy:
+    name: Deploy to Production
+    needs: ci-check
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+
+      - name: Backup SQLite database
+        run: |
+          ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" bash -s << 'BACKUP_SCRIPT'
+            set -euo pipefail
+            BACKUP_DIR="/opt/clawgent/backups"
+            DB_PATH="/opt/clawgent/app/data/clawgent.db"
+            TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
+            mkdir -p "$BACKUP_DIR"
+
+            if [ -f "$DB_PATH" ]; then
+              echo "Backing up database to ${BACKUP_DIR}/clawgent_${TIMESTAMP}.db"
+              sqlite3 "$DB_PATH" ".backup '${BACKUP_DIR}/clawgent_${TIMESTAMP}.db'"
+              echo "Backup complete"
+
+              # Keep only the last 10 backups
+              cd "$BACKUP_DIR"
+              ls -1t clawgent_*.db 2>/dev/null | tail -n +11 | xargs -r rm -f
+              echo "Retained backups:"
+              ls -1t clawgent_*.db 2>/dev/null
+            else
+              echo "No database found at ${DB_PATH} — skipping backup (first deploy)"
+            fi
+          BACKUP_SCRIPT
+        env:
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+
+      - name: Rsync app to server
+        run: |
+          rsync -avz --delete \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='.next' \
+            --exclude='.env.local' \
+            --exclude='.env.production' \
+            --exclude='data/' \
+            --exclude='.DS_Store' \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            app/ "$EC2_USER@$EC2_HOST:/opt/clawgent/app/"
+
+          scp -i ~/.ssh/deploy_key \
+            deploy/ecosystem.config.js \
+            "$EC2_USER@$EC2_HOST:/opt/clawgent/ecosystem.config.js"
+        env:
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+
+      - name: Write .env.local from secrets
+        run: |
+          printf '%s\n' \
+            "WORKOS_CLIENT_ID=$WORKOS_CLIENT_ID" \
+            "WORKOS_API_KEY=$WORKOS_API_KEY" \
+            "WORKOS_COOKIE_PASSWORD=$WORKOS_COOKIE_PASSWORD" \
+            "NEXT_PUBLIC_WORKOS_REDIRECT_URI=https://clawgent.ai/auth/callback" \
+            "NODE_ENV=production" \
+            "PORT=3001" \
+          | ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" \
+            "cat > /opt/clawgent/app/.env.local && chmod 600 /opt/clawgent/app/.env.local"
+          echo ".env.local written successfully"
+        env:
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
+          WORKOS_API_KEY: ${{ secrets.WORKOS_API_KEY }}
+          WORKOS_COOKIE_PASSWORD: ${{ secrets.WORKOS_COOKIE_PASSWORD }}
+
+      - name: Install dependencies and build on server
+        run: |
+          ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" bash -s << 'BUILD_SCRIPT'
+            set -euo pipefail
+            cd /opt/clawgent/app
+            npm ci --production=false
+            npm run build
+          BUILD_SCRIPT
+        env:
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+
+      - name: Reload PM2
+        run: |
+          ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" bash -s << 'PM2_SCRIPT'
+            set -euo pipefail
+            cd /opt/clawgent
+
+            # Try graceful reload first, fall back to delete + start
+            if pm2 reload ecosystem.config.js --update-env 2>/dev/null; then
+              echo "PM2 reload succeeded"
+            else
+              echo "PM2 reload failed — falling back to delete + start"
+              pm2 delete clawgent 2>/dev/null || true
+              pm2 start ecosystem.config.js
+            fi
+
+            pm2 save
+          PM2_SCRIPT
+        env:
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+
+      - name: Health check
+        run: |
+          ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" bash -s << 'HEALTH_SCRIPT'
+            set -euo pipefail
+
+            MAX_ATTEMPTS=15
+            INTERVAL=4
+            URL="http://localhost:3001/api/status"
+
+            echo "Polling ${URL} (max ${MAX_ATTEMPTS} attempts, ${INTERVAL}s apart)..."
+
+            for i in $(seq 1 $MAX_ATTEMPTS); do
+              echo "Attempt ${i}/${MAX_ATTEMPTS}..."
+
+              HTTP_CODE=$(curl -s -o /tmp/health_response.json -w "%{http_code}" "$URL" 2>/dev/null || echo "000")
+
+              if [ "$HTTP_CODE" = "200" ]; then
+                echo "HTTP 200 received"
+                cat /tmp/health_response.json
+
+                # Check dockerAvailable field
+                DOCKER_AVAILABLE=$(python3 -c "import sys,json; print(json.load(open('/tmp/health_response.json')).get('dockerAvailable', False))" 2>/dev/null || echo "false")
+
+                if [ "$DOCKER_AVAILABLE" = "True" ] || [ "$DOCKER_AVAILABLE" = "true" ]; then
+                  echo ""
+                  echo "Health check PASSED — app is up and Docker is available"
+                  exit 0
+                else
+                  echo "WARNING: App is responding but dockerAvailable=${DOCKER_AVAILABLE}"
+                  echo "Health check PASSED with warning — app is up but Docker may not be available"
+                  exit 0
+                fi
+              fi
+
+              echo "Got HTTP ${HTTP_CODE}, retrying in ${INTERVAL}s..."
+              sleep $INTERVAL
+            done
+
+            echo ""
+            echo "::error::Health check FAILED after ${MAX_ATTEMPTS} attempts"
+            echo ""
+            echo "=== PM2 Status ==="
+            pm2 status
+            echo ""
+            echo "=== PM2 Logs (last 50 lines) ==="
+            pm2 logs clawgent --nostream --lines 50 || true
+            exit 1
+          HEALTH_SCRIPT
+        env:
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" bash -s << 'ROLLBACK_SCRIPT'
+            set -euo pipefail
+            BACKUP_DIR="/opt/clawgent/backups"
+            DB_PATH="/opt/clawgent/app/data/clawgent.db"
+
+            echo "=== ROLLBACK: Attempting to restore latest database backup ==="
+
+            LATEST_BACKUP=$(ls -1t "${BACKUP_DIR}"/clawgent_*.db 2>/dev/null | head -1 || true)
+
+            if [ -n "$LATEST_BACKUP" ]; then
+              echo "Restoring from: ${LATEST_BACKUP}"
+              mkdir -p "$(dirname "$DB_PATH")"
+              cp "$LATEST_BACKUP" "$DB_PATH"
+              echo "Database restored"
+            else
+              echo "No backups found to restore"
+            fi
+
+            echo "Restarting PM2..."
+            cd /opt/clawgent
+            pm2 restart clawgent 2>/dev/null || pm2 start ecosystem.config.js 2>/dev/null || true
+            pm2 save 2>/dev/null || true
+
+            echo ""
+            echo "=== MANUAL INTERVENTION MAY BE REQUIRED ==="
+            echo "1. Check PM2 logs: pm2 logs clawgent"
+            echo "2. Check app status: curl http://localhost:3001/api/status"
+            echo "3. If needed, redeploy previous commit manually"
+            echo "4. Database backups in: ${BACKUP_DIR}/"
+          ROLLBACK_SCRIPT
+        env:
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
