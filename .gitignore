@@ -45,3 +45,13 @@ data/
 
 # Claude Code
 .claude/ralph-loop.local.md
+
+# Handoff notes (session-specific, not for repo)
+HANDOFF.md
+
+# Source assets (raw images, uncompressed — app uses public/sprites/)
+assets/
+
+# Project docs and context (local-only, not for repo)
+CLAUDE.md
+docs/

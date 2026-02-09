@@ -7,6 +7,15 @@ import { configureAgentPersona } from "@/lib/agent-config";
 const MAIN_WORKSPACE = "/home/node/.openclaw/workspace";
 const AGENTS_BASE = "/home/node/.openclaw/agents";
 
+/** Shape returned by `openclaw agents list --json` (OpenClaw 2026.2.x) */
+interface OpenClawAgent {
+  id: string;
+  name?: string;           // slug name (absent for main agent)
+  identityName?: string;   // display name from set-identity
+  identityEmoji?: string;  // emoji from set-identity
+  workspace: string;
+}
+
 interface AgentInfo {
   id: string;
   name: string;
@@ -40,23 +49,52 @@ export async function GET(
   }
 
   try {
-    const output = await runCommandSilent("docker", [
-      "exec", instance.containerName,
-      "openclaw", "agents", "list", "--json",
-    ]);
+    let agents: AgentInfo[] = [];
+    try {
+      const output = await runCommandSilent("docker", [
+        "exec", instance.containerName,
+        "openclaw", "agents", "list", "--json",
+      ]);
+      const raw: OpenClawAgent[] = JSON.parse(output);
+      agents = raw.map((a) => ({
+        id: a.id,
+        name: a.identityName || a.name || a.id,
+        emoji: a.identityEmoji || "",
+        workspace: a.workspace,
+      }));
+    } catch {
+      // openclaw agents list may fail or return empty — continue with fallback
+    }
 
-    const agents: AgentInfo[] = JSON.parse(output);
+    // Ensure the main agent is always included.
+    // openclaw agents list --json may not return the default "main" workspace agent.
+    const hasMain = agents.some((a) => a.id === "main");
+    if (!hasMain) {
+      const mainPersona = instance.persona ? PERSONA_CONFIGS[instance.persona] : null;
+      agents.unshift({
+        id: "main",
+        name: mainPersona?.name || "main",
+        emoji: mainPersona?.emoji || "",
+        workspace: MAIN_WORKSPACE,
+      });
+    }
 
     const result = agents.map((agent) => {
-      // Try to match the agent to a known persona by name
-      const personaId = matchPersonaByName(agent.name);
+      // Try to match the agent to a known persona by name or instance persona
+      let personaId = matchPersonaByName(agent.name);
+      // For the main agent, fall back to the instance's persona field
+      if (!personaId && agent.id === "main" && instance.persona) {
+        personaId = instance.persona;
+      }
       const persona = personaId ? PERSONA_CONFIGS[personaId] : null;
+      const skillCount = persona ? persona.skills.length : 0;
 
       return {
         agentId: agent.id,
         name: agent.name || agent.id,
         emoji: agent.emoji || persona?.emoji || "",
         persona: personaId,
+        skillCount,
         deepLink: buildDeepLink(id, instance.token, agent.id),
       };
     });
@@ -190,13 +228,16 @@ function buildDeepLink(instanceId: string, token: string, agentId: string): stri
  * Try to match an agent's display name back to a PERSONA_CONFIGS key.
  * Returns the persona ID or null if no match.
  */
-function matchPersonaByName(agentName: string): string | null {
+function matchPersonaByName(agentName: string | undefined): string | null {
+  if (!agentName) return null;
+
   // Direct key match (agent ID is the persona key)
   if (PERSONA_CONFIGS[agentName]) return agentName;
 
   // Match by display name
+  const lower = agentName.toLowerCase();
   for (const [key, config] of Object.entries(PERSONA_CONFIGS)) {
-    if (config.name.toLowerCase() === agentName.toLowerCase()) return key;
+    if (config.name.toLowerCase() === lower) return key;
   }
 
   return null;

@@ -494,6 +494,40 @@ body::after {
 /* --- 9. Sound Mute Toggle Button -------------------------- */
 
 /*
+ * Fixed top-right Discord invite link. Matches mute button style
+ * but subtler — utility link, not a CTA.
+ */
+.discord-link {
+  position: fixed;
+  top: 12px;
+  right: 56px;
+  z-index: 10000;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  border: 2px solid var(--arcade-border-color);
+  color: rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  padding: 0;
+  border-radius: 0;
+  text-decoration: none;
+}
+
+.discord-link:hover {
+  border-color: var(--arcade-purple);
+  background: rgba(0, 0, 0, 0.8);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.discord-link:active {
+  transform: scale(0.92);
+}
+
+/*
  * Fixed top-right speaker button. Pixel-art style, minimal footprint.
  * Sits above the CRT scanline overlay (z-index 10000).
  */
@@ -638,7 +672,863 @@ body::after {
   }
 }
 
-/* --- 11. Selection Styling ---------------------------------- */
+/* --- 11. SNES Start Menu ----------------------------------- */
+
+/*
+ * Start menu option rows — tall selectable items with a
+ * blinking selector arrow. The active option glows with the
+ * accent color. Keyboard and click navigable.
+ */
+.start-menu-option {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  background: transparent;
+  border: 3px solid var(--arcade-border-color);
+  color: rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  transition: all 0.12s ease;
+  position: relative;
+  width: 100%;
+  text-align: left;
+}
+
+.start-menu-option[data-active="true"] {
+  border-color: var(--arcade-yellow);
+  color: var(--arcade-yellow);
+  background: rgba(248, 216, 56, 0.04);
+  box-shadow:
+    0 0 12px rgba(248, 216, 56, 0.15),
+    inset 0 0 16px rgba(248, 216, 56, 0.03);
+}
+
+.start-menu-option[data-active="true"][data-variant="danger"] {
+  border-color: var(--arcade-pink);
+  color: var(--arcade-pink);
+  background: rgba(248, 48, 120, 0.04);
+  box-shadow:
+    0 0 12px rgba(248, 48, 120, 0.15),
+    inset 0 0 16px rgba(248, 48, 120, 0.03);
+}
+
+/* Selector arrow — classic blinking triangle */
+.start-menu-arrow {
+  font-family: var(--font-arcade);
+  font-size: 1rem;
+  animation: blink 0.8s step-end infinite;
+  flex-shrink: 0;
+  width: 1.25rem;
+  text-align: center;
+}
+
+/* Empty space to keep alignment when arrow is absent */
+.start-menu-arrow-spacer {
+  width: 1.25rem;
+  flex-shrink: 0;
+}
+
+/* Snarky message overlay animation */
+@keyframes snarky-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.8) translateY(4px);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1.05) translateY(0);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.snarky-message {
+  animation: snarky-in 0.3s ease-out;
+}
+
+/* Rejected option shake — a quick "nope" wiggle */
+@keyframes nope-shake {
+  0%, 100% { transform: translateX(0); }
+  15% { transform: translateX(-6px); }
+  30% { transform: translateX(5px); }
+  45% { transform: translateX(-4px); }
+  60% { transform: translateX(3px); }
+  75% { transform: translateX(-2px); }
+  90% { transform: translateX(1px); }
+}
+
+.nope-shake {
+  animation: nope-shake 0.4s ease-in-out;
+}
+
+/* --- 12. SF2 Character Select Grid (Redesign) --------------- */
+
+/*
+ * The select screen layout: grid on the left, preview panel
+ * on the right (desktop) or stacked (mobile). Recreates the
+ * SF2 character select screen composition.
+ */
+.sf2-select-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  width: 100%;
+  max-width: 64rem;
+  margin: 0 auto;
+}
+
+@media (min-width: 768px) {
+  .sf2-select-layout {
+    grid-template-columns: 2fr 1fr;
+    gap: 2rem;
+    align-items: start;
+  }
+}
+
+/*
+ * The outer grid frame — thick border like SF2's
+ * character grid frame. Bright yellow, prominent.
+ */
+.sf2-grid-frame {
+  border: 5px solid var(--arcade-yellow);
+  background: #060018;
+  position: relative;
+}
+
+/*
+ * Corner bracket decorations — larger, more prominent.
+ * L-shaped brackets at top-left and bottom-right.
+ */
+.sf2-grid-frame::before,
+.sf2-grid-frame::after {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-style: solid;
+  border-color: #ffffff;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.sf2-grid-frame::before {
+  top: -9px;
+  left: -9px;
+  border-width: 4px 0 0 4px;
+}
+
+.sf2-grid-frame::after {
+  bottom: -9px;
+  right: -9px;
+  border-width: 0 4px 4px 0;
+}
+
+/*
+ * Individual grid cell — persona portrait slot.
+ * CPS-1 style: bright saturated grid dividers, dark navy fill,
+ * NO smooth transitions (instant state changes like real hardware).
+ */
+.sf2-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0;
+  padding: 0;
+  background: #0a0a30;
+  border: 3px solid #3838a0;
+  cursor: pointer;
+  overflow: hidden;
+  aspect-ratio: 1 / 1;
+}
+
+/* Cell idle state — no vignette. CPS-1 uses flat fills. */
+.sf2-cell::before {
+  display: none;
+}
+
+/* Cell active/hovered state — flat color, no gradients */
+.sf2-cell[data-active="true"] {
+  border-color: var(--sf2-cell-color, var(--arcade-yellow));
+  background: #10103a;
+  z-index: 2;
+}
+
+/* Portrait area — top portion of cell, holds sprite or emoji */
+.sf2-cell-portrait {
+  position: relative;
+  flex: 1 1 0%;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Cell emoji sizing — flat, no drop-shadow (CPS-1 sprites are flat) */
+.sf2-cell-icon {
+  position: relative;
+  z-index: 2;
+  font-size: 2rem;
+  line-height: 1;
+}
+
+@media (min-width: 640px) {
+  .sf2-cell-icon {
+    font-size: 2.5rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .sf2-cell-icon {
+    font-size: 3rem;
+  }
+}
+
+/* REMOVED: icon scale on active causes flicker during hover state changes */
+.sf2-cell[data-active="true"] .sf2-cell-icon {
+  /* No transform — keeps layout rock-solid stable */
+}
+
+/* Sprite images within cells — fill the portrait area, zoom past source padding */
+.sf2-cell img.sf2-cell-sprite {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  transform: scale(1.45);
+  image-rendering: auto;
+  z-index: 1;
+}
+
+/* REMOVED: sprite scale change on active causes flicker during hover state changes */
+.sf2-cell[data-active="true"] img.sf2-cell-sprite {
+  /* No transform change — sprite stays at same scale, no layout shift */
+}
+
+/* Cell name label — dedicated bottom strip, never overlaps sprite */
+.sf2-cell-name {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  font-family: var(--font-arcade);
+  font-size: 7px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+  text-shadow: 1px 1px 0 #000;
+  background: #050516;
+  border-top: 2px solid #3838a0;
+  padding: 5px 6px;
+  width: 100%;
+  text-align: center;
+  line-height: 1.3;
+}
+
+@media (min-width: 640px) {
+  .sf2-cell-name {
+    font-size: 8px;
+    padding: 6px 6px;
+  }
+}
+
+.sf2-cell[data-active="true"] .sf2-cell-name {
+  color: var(--sf2-cell-color, var(--arcade-yellow));
+  text-shadow: 1px 1px 0 #000;
+  background: #0a0a2a;
+  border-top-color: var(--sf2-cell-color, var(--arcade-yellow));
+}
+
+/* Active cell bottom color bar indicator — instant show, no transition */
+.sf2-cell-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--sf2-cell-color, var(--arcade-yellow));
+  transform: scaleX(0);
+  z-index: 3;
+}
+
+.sf2-cell[data-active="true"] .sf2-cell-bar {
+  transform: scaleX(1);
+}
+
+/*
+ * SF2 Preview Panel — character info panel.
+ * Matches the grid frame aesthetic: thick border, flat bg.
+ * Border color syncs with the selected cell's accent color.
+ */
+.sf2-preview-panel {
+  background: #080028;
+  border: 4px solid var(--sf2-preview-color, var(--arcade-yellow));
+  position: relative;
+  height: 480px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@media (min-width: 768px) {
+  .sf2-preview-panel {
+    position: sticky;
+    top: 1rem;
+  }
+}
+
+/* Colored accent bar at top of preview panel — thicker for prominence */
+.sf2-preview-accent {
+  height: 6px;
+  background: var(--sf2-preview-color, var(--arcade-yellow));
+}
+
+/* Preview content area */
+.sf2-preview-body {
+  padding: 1.25rem;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Large persona icon in preview — flat, no filter */
+.sf2-preview-icon {
+  font-size: 3.5rem;
+  line-height: 1;
+  text-align: center;
+}
+
+@media (min-width: 768px) {
+  .sf2-preview-icon {
+    font-size: 4rem;
+  }
+}
+
+/* Persona name in preview — crisp bitmap, 1px drop shadow */
+.sf2-preview-name {
+  font-family: var(--font-arcade);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-shadow: 1px 1px 0 #000;
+  color: var(--sf2-preview-color, var(--arcade-yellow));
+}
+
+@media (min-width: 640px) {
+  .sf2-preview-name {
+    font-size: 11px;
+  }
+}
+
+/* Tagline text */
+.sf2-preview-tagline {
+  font-family: var(--font-arcade);
+  font-size: 8px;
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.8;
+  text-shadow: 1px 1px 0 #000;
+}
+
+/* Stat rows in preview */
+.sf2-preview-stat {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-arcade);
+  font-size: 6px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.sf2-preview-stat-label {
+  color: rgba(255, 255, 255, 0.3);
+  min-width: 4.5rem;
+}
+
+.sf2-preview-stat-value {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Select/deploy button inside preview — flat, no glow, instant */
+.sf2-select-btn {
+  display: block;
+  width: 100%;
+  padding: 0.875rem 1rem;
+  font-family: var(--font-arcade);
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--sf2-preview-color, var(--arcade-yellow));
+  background: transparent;
+  border: 3px solid var(--sf2-preview-color, var(--arcade-yellow));
+  cursor: pointer;
+  margin-top: auto;
+  text-shadow: 1px 1px 0 #000;
+}
+
+.sf2-select-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.sf2-select-btn:active {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Empty preview state (no persona hovered/selected) */
+.sf2-preview-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 2rem 1rem;
+}
+
+/* Keyboard hint label */
+.sf2-kb-hint {
+  font-family: var(--font-arcade);
+  font-size: 6px;
+  color: rgba(255, 255, 255, 0.15);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+/*
+ * SNES-authentic active cell blink.
+ * CPS-1 hardware: hard 2-frame color swap, no smooth interpolation.
+ * Border alternates between cell accent color and white.
+ */
+@keyframes sf2-select-blink {
+  0%, 59% { border-color: var(--sf2-cell-color, var(--arcade-yellow)); }
+  60%, 100% { border-color: #ffffff; }
+}
+
+.sf2-cell[data-active="true"] {
+  /* Solid accent border, no blink */
+}
+
+/* Screen title */
+.sf2-screen-title {
+  font-family: var(--font-arcade);
+  font-size: 0.875rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--arcade-yellow);
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+@media (min-width: 640px) {
+  .sf2-screen-title {
+    font-size: 1.125rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .sf2-screen-title {
+    font-size: 1.375rem;
+  }
+}
+
+/* --- 13. Power-Up Cards ------------------------------------ */
+
+/*
+ * Power-up channel cards — equipment-slot style.
+ * Like item pickups in a retro RPG: dark slots that light up
+ * with the platform's brand color when activated.
+ * CPS-1 rules: flat fills, sharp edges, no gradients, no radius.
+ *
+ * Platform brand colors (mapped to arcade palette):
+ *   Slack    → --arcade-green  (#38c830)
+ *   Telegram → --arcade-blue   (#00a0f8)
+ *   Discord  → --arcade-purple (#7838b8)
+ */
+
+/* ── Power-ups grid ── */
+.powerup-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@media (min-width: 640px) {
+  .powerup-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+  }
+}
+
+/* ── Card container ── */
+.powerup-card {
+  background: var(--arcade-bg-panel);
+  border: 3px solid var(--arcade-border-color);
+  padding: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.powerup-card:hover {
+  border-color: color-mix(in srgb, var(--powerup-color, var(--arcade-border-color)) 50%, var(--arcade-border-color));
+}
+
+/* Enabled/connected state — accent border, subtle inner shadow */
+.powerup-card[data-enabled="true"] {
+  border-color: var(--powerup-color, var(--arcade-green));
+  box-shadow: inset 0 0 16px rgba(0, 0, 0, 0.5);
+}
+
+/* Top accent bar — appears when card is enabled. CPS-1 flat bar. */
+.powerup-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--powerup-color, var(--arcade-green));
+  transform: scaleX(0);
+  transform-origin: left;
+  z-index: 2;
+}
+
+.powerup-card[data-enabled="true"]::before {
+  transform: scaleX(1);
+}
+
+/* ── Card header (icon, label, toggle) ── */
+.powerup-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+/* Platform icon badge — crisp pixel square, no radius */
+.powerup-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  font-family: var(--font-arcade);
+  font-size: 11px;
+  font-weight: bold;
+  flex-shrink: 0;
+  border: 2px solid transparent;
+  image-rendering: pixelated;
+}
+
+/* Dim icon when card is disabled */
+.powerup-card:not([data-enabled="true"]) .powerup-card-icon {
+  opacity: 0.5;
+}
+
+/* Platform label */
+.powerup-card-label {
+  font-family: var(--font-arcade);
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-shadow: 1px 1px 0 #000;
+}
+
+.powerup-card[data-enabled="true"] .powerup-card-label {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* ── Connection status dot ── */
+.powerup-status-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Connected: glowing green square (no radius — pixel art) */
+.powerup-status-dot[data-connected="true"] {
+  background: var(--arcade-green);
+  border-color: var(--arcade-green);
+  box-shadow:
+    0 0 4px var(--arcade-green),
+    0 0 8px rgba(56, 200, 48, 0.4);
+  animation: powerup-dot-pulse 2s step-end infinite;
+}
+
+@keyframes powerup-dot-pulse {
+  0%, 69% { opacity: 1; }
+  70%, 100% { opacity: 0.5; }
+}
+
+/* ── Card body (token input area) — slides in when toggled on ── */
+.powerup-card-body {
+  padding: 0 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  animation: powerup-body-in 0.15s step-end forwards;
+}
+
+@keyframes powerup-body-in {
+  0% {
+    opacity: 0;
+    max-height: 0;
+  }
+  100% {
+    opacity: 1;
+    max-height: 200px;
+  }
+}
+
+/* Token input label */
+.powerup-token-label {
+  font-family: var(--font-arcade);
+  font-size: 6px;
+  color: rgba(255, 255, 255, 0.25);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+/* Token input field — retro terminal: dark bg, monospace, blinking caret */
+.powerup-token-input {
+  background: rgba(0, 0, 0, 0.7);
+  border: 2px solid var(--arcade-border-color);
+  color: var(--powerup-color, var(--arcade-green));
+  font-family: var(--font-mono, "Courier New", monospace);
+  font-size: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  outline: none;
+  border-radius: 0;
+  width: 100%;
+  caret-color: var(--powerup-color, var(--arcade-green));
+}
+
+.powerup-token-input::placeholder {
+  color: color-mix(in srgb, var(--powerup-color, var(--arcade-green)) 25%, transparent);
+}
+
+.powerup-token-input:focus {
+  border-color: var(--powerup-color, var(--arcade-green));
+  box-shadow:
+    0 0 4px color-mix(in srgb, var(--powerup-color, var(--arcade-green)) 40%, transparent),
+    inset 0 0 8px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Toggle switch — pixel-art feel, no border-radius ── */
+.powerup-toggle {
+  margin-left: auto;
+  width: 36px;
+  height: 18px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  position: relative;
+  padding: 0;
+  flex-shrink: 0;
+  border-radius: 0;
+}
+
+.powerup-toggle:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.powerup-toggle-knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 12px;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Toggle ON state — accent color fill */
+.powerup-toggle-on {
+  background: color-mix(in srgb, var(--powerup-color, var(--arcade-green)) 15%, transparent);
+  border-color: var(--powerup-color, var(--arcade-green));
+}
+
+.powerup-toggle-on .powerup-toggle-knob {
+  left: 19px;
+  background: var(--powerup-color, var(--arcade-green));
+}
+
+/* ── Connect / Disconnect buttons ── */
+.powerup-btn-connect {
+  font-family: var(--font-arcade);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.5rem 1rem;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 0;
+  color: var(--arcade-green);
+  border: 2px solid var(--arcade-green);
+  text-shadow: 1px 1px 0 #000;
+}
+
+.powerup-btn-connect:hover {
+  background: rgba(56, 200, 48, 0.1);
+  box-shadow: 0 0 8px rgba(56, 200, 48, 0.3);
+}
+
+.powerup-btn-connect:active {
+  transform: scale(0.95);
+}
+
+.powerup-btn-disconnect {
+  font-family: var(--font-arcade);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.5rem 1rem;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 0;
+  color: var(--arcade-red);
+  border: 2px solid var(--arcade-red);
+  text-shadow: 1px 1px 0 #000;
+}
+
+.powerup-btn-disconnect:hover {
+  background: rgba(216, 32, 32, 0.1);
+  box-shadow: 0 0 8px rgba(216, 32, 32, 0.3);
+}
+
+.powerup-btn-disconnect:active {
+  transform: scale(0.95);
+}
+
+/* ── Loading / in-flight state ── */
+
+/*
+ * Pixel-art pulse: hard on/off opacity steps, NOT a smooth fade.
+ * Like a blinking power LED on a SNES cartridge slot.
+ */
+@keyframes powerup-loading {
+  0%, 39% { opacity: 1; }
+  40%, 59% { opacity: 0.4; }
+  60%, 79% { opacity: 1; }
+  80%, 100% { opacity: 0.4; }
+}
+
+.powerup-loading {
+  animation: powerup-loading 1.2s step-end infinite;
+  pointer-events: none;
+}
+
+/* ── Success flash — green border flash, then settle ── */
+@keyframes powerup-success-flash {
+  0% {
+    border-color: #ffffff;
+    box-shadow: 0 0 12px var(--arcade-green), inset 0 0 12px rgba(56, 200, 48, 0.15);
+  }
+  33% {
+    border-color: var(--arcade-green);
+    box-shadow: 0 0 6px var(--arcade-green);
+  }
+  66% {
+    border-color: #ffffff;
+    box-shadow: 0 0 12px var(--arcade-green);
+  }
+  100% {
+    border-color: var(--arcade-green);
+    box-shadow: inset 0 0 16px rgba(0, 0, 0, 0.5);
+  }
+}
+
+.powerup-success {
+  animation: powerup-success-flash 0.6s step-end forwards;
+}
+
+/* ── Error shake — reuses the existing shake keyframes ── */
+.powerup-error {
+  animation: shake 0.4s ease-in-out;
+  border-color: var(--arcade-red) !important;
+}
+
+/* ── Dashboard compact power-up cards (instance management view) ── */
+
+/*
+ * Smaller, denser layout for the "your instance" dashboard.
+ * Same equipment-slot vibe but condensed to fit the roster view.
+ */
+.powerup-compact {
+  background: var(--arcade-bg-panel);
+  border: 2px solid var(--arcade-border-color);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  position: relative;
+}
+
+.powerup-compact:hover {
+  border-color: color-mix(in srgb, var(--powerup-color, var(--arcade-border-color)) 40%, var(--arcade-border-color));
+}
+
+.powerup-compact[data-connected="true"] {
+  border-color: var(--powerup-color, var(--arcade-green));
+}
+
+.powerup-compact-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  font-size: 8px;
+  font-weight: bold;
+  font-family: var(--font-arcade);
+  flex-shrink: 0;
+}
+
+.powerup-compact:not([data-connected="true"]) .powerup-compact-icon {
+  opacity: 0.4;
+}
+
+.powerup-compact-label {
+  font-family: var(--font-arcade);
+  font-size: 7px;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.powerup-compact[data-connected="true"] .powerup-compact-label {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Compact status indicator — right-aligned square dot */
+.powerup-compact-dot {
+  margin-left: auto;
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.powerup-compact[data-connected="true"] .powerup-compact-dot {
+  background: var(--powerup-color, var(--arcade-green));
+  box-shadow: 0 0 4px var(--powerup-color, var(--arcade-green));
+}
+
+/* --- 14. Selection Styling ---------------------------------- */
 ::selection {
   background: var(--arcade-yellow);
   color: #000000;

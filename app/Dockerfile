@@ -1,11 +1,15 @@
 # Clawgent — Production Dockerfile
 # Multi-stage build: install deps + build Next.js, then run with custom server
+#
+# NOTE: This container does NOT run Docker-in-Docker. The host Docker socket
+# is mounted at runtime (-v /var/run/docker.sock:/var/run/docker.sock) so the
+# app can spawn sibling OpenClaw containers on the host.
 
 FROM node:22-bookworm-slim AS base
 
-# Install Docker CLI (needed to spawn OpenClaw containers)
+# Install build tools for native addons (better-sqlite3) and Docker CLI
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl gnupg && \
+    ca-certificates curl gnupg python3 make g++ lsof && \
     install -m 0755 -d /etc/apt/keyrings && \
     curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
     chmod a+r /etc/apt/keyrings/docker.asc && \
@@ -16,18 +20,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# --- Dependencies ---
+# --- All dependencies (dev + prod, needed for build AND tsx at runtime) ---
 FROM base AS deps
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
-
-# Also install dev deps for build stage
-FROM base AS deps-all
 COPY package.json package-lock.json ./
 RUN npm ci
 
 # --- Build ---
-FROM deps-all AS builder
+FROM deps AS builder
 COPY . .
 RUN npm run build
 
@@ -38,12 +37,12 @@ ENV PORT=3001
 
 WORKDIR /app
 
-# Copy built Next.js app
+# Copy built Next.js app (standalone output)
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 
-# Copy production dependencies
+# Copy all node_modules (tsx is a devDep but needed at runtime for server.ts)
 COPY --from=deps /app/node_modules ./node_modules
 
 # Copy source files needed by custom server
@@ -58,5 +57,5 @@ RUN mkdir -p /app/data
 
 EXPOSE 3001
 
-# Use tsx to run the custom server (same as local dev, but NODE_ENV=production)
-CMD ["npx", "tsx", "server.ts"]
+# Run the custom server via tsx (handles both HTTP and raw TCP WebSocket proxy)
+CMD ["./node_modules/.bin/tsx", "server.ts"]

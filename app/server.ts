@@ -1,6 +1,8 @@
-import { createServer } from "http";
+import { createServer, IncomingMessage } from "http";
 import { connect, Socket } from "net";
 import next from "next";
+
+type UpgradeHandler = (req: IncomingMessage, socket: Socket, head: Buffer) => void;
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
@@ -26,25 +28,26 @@ app.prepare().then(() => {
   });
 
   // Get Next.js's upgrade handler so we can delegate HMR to it
-  const nextUpgradeHandler = (app as any).getUpgradeHandler();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nextUpgradeHandler: UpgradeHandler | undefined = (app as any).getUpgradeHandler();
 
   // Prevent Next.js from registering its own "upgrade" listener on the server.
   // Next.js calls `server.on('upgrade', ...)` lazily during the first HTTP request.
   // We intercept that to keep a single upgrade handler (ours) in control.
   const origOn = server.on.bind(server);
-  let nextAutoHandler: Function | null = null;
-  server.on = function (event: string, listener: Function) {
+  let nextAutoHandler: UpgradeHandler | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (server as any).on = function (event: string, listener: UpgradeHandler) {
     if (event === "upgrade" && nextAutoHandler === null && server.listenerCount("upgrade") > 0) {
-      // Next.js is trying to register its auto handler — capture it but don't register
       nextAutoHandler = listener;
       return server;
     }
     return origOn(event, listener);
-  } as any;
+  };
 
   // Single upgrade handler: route instance WS to Docker containers,
   // everything else to Next.js (HMR).
-  server.on("upgrade", (req: any, socket: Socket, head: Buffer) => {
+  server.on("upgrade", (req: IncomingMessage, socket: Socket, head: Buffer) => {
     const url = req.url || "";
     const match = url.match(/^\/i\/([a-z0-9]+)(\/.*)?$/);
 
