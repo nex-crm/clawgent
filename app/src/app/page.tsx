@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { PERSONA_CONFIGS } from "../lib/personas";
 import { useAuthSafe } from "../lib/use-auth-safe";
 import { getSignInUrlAction, signOutAction } from "./actions/auth";
@@ -136,7 +136,7 @@ const PERSONAS: Persona[] = [
 
 // ─── Provider Config ────────────────────────────────────────────────
 
-type Provider = "anthropic" | "google" | "openai";
+type Provider = "anthropic" | "google" | "openai" | "nex";
 
 const PROVIDERS: {
   value: Provider;
@@ -161,6 +161,12 @@ const PROVIDERS: {
     label: "GPT-5.2",
     shortLabel: "GPT",
     model: "openai/gpt-5.2",
+  },
+  {
+    value: "nex",
+    label: "Free via Nex.ai",
+    shortLabel: "FREE",
+    model: "google/gemini-2.5-flash",
   },
 ];
 
@@ -231,6 +237,330 @@ function colorToCssVar(color: string): string {
   return `var(--${color})`;
 }
 
+// ─── Shared Persona Icon (sprite or emoji fallback) ───────────────
+
+function PersonaIcon({ persona, size = "cell" }: { persona: Persona; size?: "cell" | "preview" }) {
+  if (persona.sprite) {
+    if (size === "cell") {
+      return (
+        <img
+          src={persona.sprite}
+          alt={persona.name}
+          className="sf2-cell-sprite"
+          draggable={false}
+        />
+      );
+    }
+    return (
+      <img
+        src={persona.sprite}
+        alt={persona.name}
+        className="w-20 h-20 sm:w-24 sm:h-24 object-contain"
+        style={{ filter: `drop-shadow(0 0 6px ${colorToCssVar(persona.color)})` }}
+        draggable={false}
+      />
+    );
+  }
+  if (size === "preview") {
+    return <span className="sf2-preview-icon">{persona.icon}</span>;
+  }
+  return <span className="sf2-cell-icon">{persona.icon}</span>;
+}
+
+// ─── Memoized Grid Cell ─────────────────────────────────────────────
+
+interface PersonaGridCellProps {
+  persona: Persona;
+  index: number;
+  isActive: boolean;
+  isHovered: boolean;
+  isPinned: boolean;
+  cellColor: string;
+  disabled: boolean;
+  onClick: (persona: Persona, index: number) => void;
+  onHover: (persona: Persona, index: number) => void;
+  onLeave: () => void;
+}
+
+const PersonaGridCell = memo(function PersonaGridCell({
+  persona, index, isActive, isHovered, isPinned, cellColor, disabled, onClick, onHover, onLeave,
+}: PersonaGridCellProps) {
+  return (
+    <button
+      onClick={() => onClick(persona, index)}
+      onMouseEnter={() => onHover(persona, index)}
+      onMouseLeave={onLeave}
+      disabled={disabled}
+      className="sf2-cell"
+      data-active={isActive || isPinned}
+      data-hovered={isHovered && !isPinned}
+      data-pinned={isPinned}
+      style={{ "--sf2-cell-color": cellColor } as React.CSSProperties}
+    >
+      {isPinned && (
+        <>
+          <span className="sf2-cursor sf2-cursor-tl" style={{ borderColor: cellColor }} />
+          <span className="sf2-cursor sf2-cursor-tr" style={{ borderColor: cellColor }} />
+          <span className="sf2-cursor sf2-cursor-bl" style={{ borderColor: cellColor }} />
+          <span className="sf2-cursor sf2-cursor-br" style={{ borderColor: cellColor }} />
+        </>
+      )}
+      <span className="sf2-cell-portrait">
+        <PersonaIcon persona={persona} size="cell" />
+      </span>
+      <span className="sf2-cell-name">{persona.name}</span>
+      <span className="sf2-cell-bar" />
+    </button>
+  );
+}, (prev, next) =>
+  prev.persona.id === next.persona.id &&
+  prev.isActive === next.isActive &&
+  prev.isHovered === next.isHovered &&
+  prev.isPinned === next.isPinned &&
+  prev.cellColor === next.cellColor &&
+  prev.disabled === next.disabled
+);
+
+// ─── Memoized Preview Panel ─────────────────────────────────────────
+
+interface PersonaPreviewPanelProps {
+  displayPersona: Persona | null;
+  accentVar: string;
+  busy: boolean;
+  actionLabel: string;
+  onActionClick: (persona: Persona) => void;
+  onViewAllSkills: (persona: Persona) => void;
+}
+
+const PersonaPreviewPanel = memo(function PersonaPreviewPanel({
+  displayPersona, accentVar, busy, actionLabel, onActionClick, onViewAllSkills,
+}: PersonaPreviewPanelProps) {
+  if (busy) return (
+    <div
+      className="sf2-preview-panel"
+      style={{ "--sf2-preview-color": "var(--arcade-green)" } as React.CSSProperties}
+    >
+      <div className="sf2-preview-accent" />
+      <div className="sf2-preview-empty">
+        <div className="w-8 h-8 border-2 border-arcade-green border-t-transparent rounded-full animate-spin" />
+        <p className="pixel-font text-arcade-green text-[9px] blink tracking-wider mt-3">
+          CONFIGURING AGENT...
+        </p>
+      </div>
+    </div>
+  );
+
+  if (!displayPersona) return (
+    <div
+      className="sf2-preview-panel"
+      style={{ "--sf2-preview-color": "var(--arcade-yellow)" } as React.CSSProperties}
+    >
+      <div className="sf2-preview-accent" />
+      <div className="sf2-preview-empty">
+        <p className="pixel-font text-white/25 text-[8px] blink tracking-wider">
+          HOVER TO PREVIEW
+        </p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div
+      className="sf2-preview-panel"
+      style={{ "--sf2-preview-color": accentVar } as React.CSSProperties}
+    >
+      <div className="sf2-preview-accent" />
+      <div className="sf2-preview-body">
+        {/* Large icon */}
+        <div className="flex justify-center">
+          <PersonaIcon persona={displayPersona} size="preview" />
+        </div>
+
+        {/* Name */}
+        <p className="sf2-preview-name">{displayPersona.name}</p>
+
+        {/* Tagline */}
+        <p className="sf2-preview-tagline">{displayPersona.tagline}</p>
+
+        {/* Stats */}
+        <div className="space-y-1.5">
+          <div className="sf2-preview-stat">
+            <span className="sf2-preview-stat-label">MODEL</span>
+            <span className="sf2-preview-stat-value">
+              {PROVIDERS.find((p) => p.value === displayPersona.recommendedModel)?.shortLabel ?? "CLAUDE"}
+            </span>
+          </div>
+          <div className="sf2-preview-stat">
+            <span className="sf2-preview-stat-label">SKILLS</span>
+            <span className="sf2-preview-stat-value">
+              {displayPersona.skills.length}
+            </span>
+          </div>
+        </div>
+
+        {/* Skill tags — max 4 shown */}
+        {displayPersona.skills.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {displayPersona.skills.slice(0, 4).map((skill) => (
+              <span
+                key={skill.name}
+                className="pixel-font text-[9px] px-2.5 py-1 border border-white/20 bg-white/10 text-white/80"
+                title={skill.description}
+              >
+                {skill.name}
+              </span>
+            ))}
+            {displayPersona.skills.length > 4 && (
+              <span className="pixel-font text-[9px] px-2.5 py-1 text-white/40">
+                +{displayPersona.skills.length - 4} MORE
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* View All Skills button */}
+        {displayPersona.skills.length > 0 && (
+          <button
+            onClick={() => onViewAllSkills(displayPersona)}
+            onMouseEnter={() => ArcadeSounds.buttonHover()}
+            className="pixel-font text-[7px] tracking-wider text-white/30 hover:text-white/60 border border-white/15 hover:border-white/30 px-3 py-1.5 w-full text-center transition-all cursor-pointer"
+          >
+            VIEW ALL {displayPersona.skills.length} SKILLS
+          </button>
+        )}
+
+        {/* Action Button */}
+        <button
+          onClick={() => onActionClick(displayPersona)}
+          onMouseEnter={() => ArcadeSounds.buttonHover()}
+          disabled={busy}
+          className="sf2-select-btn"
+          style={{
+            "--sf2-preview-color": accentVar,
+          } as React.CSSProperties}
+        >
+          {actionLabel}
+        </button>
+      </div>
+    </div>
+  );
+});
+
+// ─── Template Detail Modal ──────────────────────────────────────────
+
+interface TemplateDetailModalProps {
+  persona: Persona;
+  onClose: () => void;
+}
+
+function TemplateDetailModal({ persona, onClose }: TemplateDetailModalProps) {
+  const accentVar = colorToCssVar(persona.color);
+
+  // Close on ESC
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="template-modal-overlay"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${persona.name} skills`}
+    >
+      <div
+        className="template-modal"
+        style={{ "--template-modal-color": accentVar } as React.CSSProperties}
+      >
+        {/* Top accent bar */}
+        <div className="template-modal-accent" />
+
+        {/* Header */}
+        <div className="template-modal-header">
+          <div className="flex items-center gap-3">
+            {persona.sprite ? (
+              <img
+                src={persona.sprite}
+                alt={persona.name}
+                className="w-12 h-12 object-contain"
+                style={{ filter: `drop-shadow(0 0 4px ${accentVar})` }}
+                draggable={false}
+              />
+            ) : (
+              <span className="text-3xl">{persona.icon}</span>
+            )}
+            <div>
+              <p className="pixel-font text-sm sm:text-base tracking-wider" style={{ color: accentVar }}>
+                {persona.name}
+              </p>
+              <p className="pixel-font text-[8px] sm:text-[9px] text-white/40 mt-1 leading-relaxed">
+                {persona.tagline}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            onMouseEnter={() => ArcadeSounds.buttonHover()}
+            className="template-modal-close"
+            aria-label="Close"
+          >
+            ESC
+          </button>
+        </div>
+
+        {/* Skill count */}
+        <div className="px-5 py-2">
+          <p className="pixel-font text-[8px] sm:text-[9px] text-white/25 tracking-wider">
+            {persona.skills.length} SKILL{persona.skills.length !== 1 ? "S" : ""} PRE-LOADED
+          </p>
+        </div>
+
+        {/* Skills list */}
+        <div className="template-modal-skills">
+          {persona.skills.map((skill) => (
+            <div key={skill.name} className="template-skill-card">
+              <div className="flex items-start gap-2.5">
+                <span className="text-base shrink-0 mt-0.5">{skill.emoji}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="pixel-font text-[11px] sm:text-xs text-white/80 tracking-wider">
+                    {skill.name}
+                  </p>
+                  <p className="pixel-font text-[10px] sm:text-[11px] text-white/35 mt-1.5 leading-relaxed">
+                    {skill.description}
+                  </p>
+                  <p className="pixel-font text-[8px] sm:text-[9px] text-white/20 mt-1.5 tracking-wider">
+                    {skill.sourceUrl ? (
+                      <a
+                        href={skill.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:text-white/40 transition-colors"
+                        style={{ color: accentVar, opacity: 0.6 }}
+                      >
+                        {skill.source} ↗
+                      </a>
+                    ) : (
+                      <span>{skill.source}</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ─────────────────────────────────────────────────
 
 export default function Home() {
@@ -247,6 +577,10 @@ export default function Home() {
   const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
   const [hoveredPersona, setHoveredPersona] = useState<Persona | null>(null);
   const [gridIndex, setGridIndex] = useState(0); // 0-8 for 3x3 grid keyboard nav
+  // Click-to-pin: clicking a grid cell pins that persona in the preview panel.
+  // The preview stays locked to the pinned persona regardless of hover.
+  // Clicking the same pinned cell again triggers the action (deploy/select).
+  const [pinnedPersona, setPinnedPersona] = useState<Persona | null>(null);
   const [selectedProvider, setSelectedProvider] =
     useState<Provider>("anthropic");
   const [apiKey, setApiKey] = useState("");
@@ -307,6 +641,7 @@ export default function Home() {
   const [addingAgent, setAddingAgent] = useState(false);
   const [showAddAgentSelect, setShowAddAgentSelect] = useState(false);
   const [addAgentHovered, setAddAgentHovered] = useState<Persona | null>(null);
+  const [addAgentPinned, setAddAgentPinned] = useState<Persona | null>(null);
 
   // Start menu state (SNES-style select)
   const [startMenuIndex, setStartMenuIndex] = useState(0);
@@ -541,6 +876,7 @@ export default function Home() {
     } finally {
       setAddingAgent(false);
       setShowAddAgentSelect(false);
+      setAddAgentPinned(null);
     }
   }, [fetchAgents]);
 
@@ -675,6 +1011,7 @@ export default function Home() {
   function handlePersonaSelect(persona: Persona) {
     ArcadeSounds.select();
     setSelectedPersona(persona);
+    setPinnedPersona(null);
     setSelectedProvider(persona.recommendedModel);
     setScreen("apikey");
     ArcadeSounds.screenTransition();
@@ -683,13 +1020,14 @@ export default function Home() {
   function handleStartFromScratch() {
     ArcadeSounds.select();
     setSelectedPersona(null);
+    setPinnedPersona(null);
     setSelectedProvider("anthropic");
     setScreen("apikey");
     ArcadeSounds.screenTransition();
   }
 
   async function handleLaunch() {
-    if (!apiKey.trim()) return;
+    if (selectedProvider !== "nex" && !apiKey.trim()) return;
 
     ArcadeSounds.deployStart();
 
@@ -712,7 +1050,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider: selectedProvider,
-          apiKey: apiKey.trim(),
+          apiKey: selectedProvider === "nex" ? "" : apiKey.trim(),
           ...(selectedPersona ? { persona: selectedPersona.id } : {}),
           ...(Object.keys(setupChannels).length > 0 ? { channels: setupChannels } : {}),
         }),
@@ -778,6 +1116,7 @@ export default function Home() {
       setLiveChannels([]);
       setExpandedChannel(null);
       setShowAddAgentSelect(false);
+      setAddAgentPinned(null);
       setScreen("start");
       fetchStatus();
       fetchUserData();
@@ -791,6 +1130,7 @@ export default function Home() {
     ArcadeSounds.screenTransition();
     setScreen("start");
     setSelectedPersona(null);
+    setPinnedPersona(null);
     setApiKey("");
     setShowOnline(false);
     setShowReady(false);
@@ -915,6 +1255,7 @@ export default function Home() {
       if (newIndex !== gridIndex) {
         setGridIndex(newIndex);
         setHoveredPersona(PERSONAS[newIndex]);
+        setPinnedPersona(PERSONAS[newIndex]); // keyboard nav pins the focused cell
         playCursorMove();
       }
     }
@@ -923,38 +1264,19 @@ export default function Home() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [screen, gridIndex, playCursorMove]);
 
-  // ─── Shared Persona Icon (sprite or emoji fallback) ───────────
+  // ─── Template Detail Modal State ────────────────────────────────
+  const [templateModalPersona, setTemplateModalPersona] = useState<Persona | null>(null);
 
-  function PersonaIcon({ persona, size = "cell" }: { persona: Persona; size?: "cell" | "preview" }) {
-    if (persona.sprite) {
-      if (size === "cell") {
-        // Cell sprites: absolutely positioned, fill the cell via CSS
-        return (
-          <img
-            src={persona.sprite}
-            alt={persona.name}
-            className="sf2-cell-sprite"
-            draggable={false}
-          />
-        );
-      }
-      // Preview sprites: fixed size with glow
-      return (
-        <img
-          src={persona.sprite}
-          alt={persona.name}
-          className="w-20 h-20 sm:w-24 sm:h-24 object-contain"
-          style={{ filter: `drop-shadow(0 0 6px ${colorToCssVar(persona.color)})` }}
-          draggable={false}
-        />
-      );
-    }
-    // Emoji fallback
-    if (size === "preview") {
-      return <span className="sf2-preview-icon">{persona.icon}</span>;
-    }
-    return <span className="sf2-cell-icon">{persona.icon}</span>;
-  }
+  const handleViewAllSkills = useCallback((persona: Persona) => {
+    ArcadeSounds.select();
+    setTemplateModalPersona(persona);
+  }, []);
+
+
+  const handleCloseTemplateModal = useCallback(() => {
+    ArcadeSounds.back();
+    setTemplateModalPersona(null);
+  }, []);
 
   // ─── Shared Persona Select Screen ─────────────────────────────
 
@@ -975,6 +1297,8 @@ export default function Home() {
     onBack: () => void;
     onScratch: () => void;
     showKeyboardNav: boolean;
+    /** When set, the preview panel shows this persona regardless of hover state. */
+    pinnedPersona?: Persona | null;
   }
 
   function renderPersonaSelect(config: PersonaSelectConfig) {
@@ -983,9 +1307,13 @@ export default function Home() {
       hoveredPersona: hovered, activeGridIndex, isLoading: busy,
       onCellClick, onCellHover, onCellLeave, onActionClick,
       onBack, onScratch, showKeyboardNav,
+      pinnedPersona: pinned,
     } = config;
 
-    const displayPersona = hovered ?? PERSONAS[activeGridIndex];
+    // Click-to-pin: pinned persona takes priority over hover/keyboard focus.
+    // The preview panel stays locked to the pinned persona so the user can
+    // safely move their mouse to the panel buttons without the preview swapping.
+    const displayPersona = pinned ?? hovered ?? PERSONAS[activeGridIndex];
     const accentVar = displayPersona ? colorToCssVar(displayPersona.color) : "var(--arcade-yellow)";
 
     return (
@@ -1007,146 +1335,36 @@ export default function Home() {
                 const isHovered = hovered?.id === persona.id;
                 const isKbFocused = showKeyboardNav && activeGridIndex === index;
                 const isActive = isHovered || isKbFocused;
+                const isPinned = pinned?.id === persona.id;
                 const cellColor = colorToCssVar(persona.color);
                 return (
-                  <button
+                  <PersonaGridCell
                     key={persona.id}
-                    onClick={() => onCellClick(persona, index)}
-                    onMouseEnter={() => onCellHover(persona, index)}
-                    onMouseLeave={onCellLeave}
+                    persona={persona}
+                    index={index}
+                    isActive={isActive}
+                    isHovered={isHovered}
+                    isPinned={isPinned}
+                    cellColor={cellColor}
                     disabled={busy}
-                    className="sf2-cell"
-                    data-active={isActive}
-                    style={{
-                      "--sf2-cell-color": cellColor,
-                    } as React.CSSProperties}
-                  >
-                    {isActive && (
-                      <>
-                        <span className="sf2-cursor sf2-cursor-tl" style={{ borderColor: cellColor }} />
-                        <span className="sf2-cursor sf2-cursor-tr" style={{ borderColor: cellColor }} />
-                        <span className="sf2-cursor sf2-cursor-bl" style={{ borderColor: cellColor }} />
-                        <span className="sf2-cursor sf2-cursor-br" style={{ borderColor: cellColor }} />
-                      </>
-                    )}
-
-                    {/* Sprite/icon area — takes up top portion of cell */}
-                    <span className="sf2-cell-portrait">
-                      <PersonaIcon persona={persona} size="cell" />
-                    </span>
-
-                    {/* Name strip — dedicated bottom slot, never overlaps sprite */}
-                    <span className="sf2-cell-name">{persona.name}</span>
-
-                    {/* Bottom accent bar */}
-                    <span className="sf2-cell-bar" />
-                  </button>
+                    onClick={onCellClick}
+                    onHover={onCellHover}
+                    onLeave={onCellLeave}
+                  />
                 );
               })}
             </div>
           </div>
 
           {/* PREVIEW PANEL */}
-          {(() => {
-            if (busy) return (
-              <div
-                className="sf2-preview-panel"
-                style={{ "--sf2-preview-color": "var(--arcade-green)" } as React.CSSProperties}
-              >
-                <div className="sf2-preview-accent" />
-                <div className="sf2-preview-empty">
-                  <div className="w-8 h-8 border-2 border-arcade-green border-t-transparent rounded-full animate-spin" />
-                  <p className="pixel-font text-arcade-green text-[9px] blink tracking-wider mt-3">
-                    CONFIGURING AGENT...
-                  </p>
-                </div>
-              </div>
-            );
-
-            if (!displayPersona) return (
-              <div
-                className="sf2-preview-panel"
-                style={{ "--sf2-preview-color": "var(--arcade-yellow)" } as React.CSSProperties}
-              >
-                <div className="sf2-preview-accent" />
-                <div className="sf2-preview-empty">
-                  <p className="pixel-font text-white/25 text-[8px] blink tracking-wider">
-                    HOVER TO PREVIEW
-                  </p>
-                </div>
-              </div>
-            );
-
-            return (
-              <div
-                className="sf2-preview-panel"
-                style={{ "--sf2-preview-color": accentVar } as React.CSSProperties}
-              >
-                <div className="sf2-preview-accent" />
-                <div className="sf2-preview-body">
-                  {/* Large icon */}
-                  <div className="flex justify-center">
-                    <PersonaIcon persona={displayPersona} size="preview" />
-                  </div>
-
-                  {/* Name */}
-                  <p className="sf2-preview-name">{displayPersona.name}</p>
-
-                  {/* Tagline */}
-                  <p className="sf2-preview-tagline">{displayPersona.tagline}</p>
-
-                  {/* Stats */}
-                  <div className="space-y-1.5">
-                    <div className="sf2-preview-stat">
-                      <span className="sf2-preview-stat-label">MODEL</span>
-                      <span className="sf2-preview-stat-value">
-                        {PROVIDERS.find((p) => p.value === displayPersona.recommendedModel)?.shortLabel ?? "CLAUDE"}
-                      </span>
-                    </div>
-                    <div className="sf2-preview-stat">
-                      <span className="sf2-preview-stat-label">SKILLS</span>
-                      <span className="sf2-preview-stat-value">
-                        {displayPersona.skills.length}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Skill tags — max 4 shown */}
-                  {displayPersona.skills.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      {displayPersona.skills.slice(0, 4).map((skill) => (
-                        <span
-                          key={skill.name}
-                          className="pixel-font text-[9px] px-2.5 py-1 border border-white/20 bg-white/10 text-white/80"
-                          title={skill.description}
-                        >
-                          {skill.name}
-                        </span>
-                      ))}
-                      {displayPersona.skills.length > 4 && (
-                        <span className="pixel-font text-[9px] px-2.5 py-1 text-white/40">
-                          +{displayPersona.skills.length - 4} MORE
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Action Button */}
-                  <button
-                    onClick={() => onActionClick(displayPersona)}
-                    onMouseEnter={() => ArcadeSounds.buttonHover()}
-                    disabled={busy}
-                    className="sf2-select-btn"
-                    style={{
-                      "--sf2-preview-color": accentVar,
-                    } as React.CSSProperties}
-                  >
-                    {actionLabel}
-                  </button>
-                </div>
-              </div>
-            );
-          })()}
+          <PersonaPreviewPanel
+            displayPersona={busy ? null : displayPersona}
+            accentVar={accentVar}
+            busy={busy}
+            actionLabel={actionLabel}
+            onActionClick={onActionClick}
+            onViewAllSkills={handleViewAllSkills}
+          />
         </div>
 
         {/* Bottom Actions + Hints */}
@@ -1790,13 +2008,20 @@ export default function Home() {
                 actionLabel: "ADD THIS AGENT",
                 backLabel: "BACK",
                 scratchLabel: "START FROM SCRATCH",
-                kbHint: "HOVER TO PREVIEW / CLICK TO ADD",
+                kbHint: "CLICK TO PREVIEW / CLICK AGAIN TO ADD",
                 hoveredPersona: addAgentHovered,
                 activeGridIndex: 0,
                 isLoading: addingAgent,
                 onCellClick: (persona) => {
-                  ArcadeSounds.select();
-                  addAgentToInstance(userInstance!.id, persona.id);
+                  // Click-to-pin: if clicking a different persona, pin it.
+                  // If clicking the already-pinned persona, trigger the action.
+                  if (addAgentPinned?.id === persona.id) {
+                    ArcadeSounds.select();
+                    addAgentToInstance(userInstance!.id, persona.id);
+                  } else {
+                    ArcadeSounds.select();
+                    setAddAgentPinned(persona);
+                  }
                 },
                 onCellHover: (persona) => {
                   playCursorMove();
@@ -1812,12 +2037,14 @@ export default function Home() {
                   ArcadeSounds.screenTransition();
                   setShowAddAgentSelect(false);
                   setAddAgentHovered(null);
+                  setAddAgentPinned(null);
                 },
                 onScratch: () => {
                   ArcadeSounds.select();
                   addAgentToInstance(userInstance!.id, null);
                 },
                 showKeyboardNav: false,
+                pinnedPersona: addAgentPinned,
               })
             )}
 
@@ -1845,7 +2072,16 @@ export default function Home() {
             hoveredPersona,
             activeGridIndex: gridIndex,
             isLoading: false,
-            onCellClick: (persona) => handlePersonaSelect(persona),
+            onCellClick: (persona) => {
+              // Click-to-pin: if clicking a different persona, pin it.
+              // If clicking the already-pinned persona, trigger the action.
+              if (pinnedPersona?.id === persona.id) {
+                handlePersonaSelect(persona);
+              } else {
+                ArcadeSounds.select();
+                setPinnedPersona(persona);
+              }
+            },
             onCellHover: (persona, index) => {
               playCursorMove();
               setHoveredPersona(persona);
@@ -1856,6 +2092,7 @@ export default function Home() {
             onBack: handleBackToStart,
             onScratch: handleStartFromScratch,
             showKeyboardNav: true,
+            pinnedPersona,
           })
         )}
 
@@ -1903,86 +2140,145 @@ export default function Home() {
             )}
 
             {/* Provider Selector */}
-            <div className="grid grid-cols-3 gap-2">
-              {PROVIDERS.map((p) => (
-                <button
-                  key={p.value}
-                  onClick={() => setSelectedProvider(p.value)}
-                  className={`
-                    pixel-font text-[8px] sm:text-[9px] py-3 px-2 transition-all duration-150 cursor-pointer
-                    ${
-                      selectedProvider === p.value
-                        ? "bg-arcade-green text-black border-2 border-arcade-green"
-                        : "arcade-panel text-white/60 hover:text-white/80"
+            <div className="flex flex-col gap-2">
+              {/* BYOK providers — 3-column row */}
+              <div className="grid grid-cols-3 gap-2">
+                {PROVIDERS.filter((p) => p.value !== "nex").map((p) => (
+                  <button
+                    key={p.value}
+                    onClick={() => setSelectedProvider(p.value)}
+                    className={`
+                      pixel-font text-[8px] sm:text-[9px] py-3 px-2 cursor-pointer
+                      ${
+                        selectedProvider === p.value
+                          ? "bg-arcade-green text-black border-2 border-arcade-green"
+                          : "arcade-panel text-white/60 hover:text-white/80"
+                      }
+                    `}
+                  >
+                    {p.shortLabel}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {selectedProvider === "nex" ? (
+              <>
+                {/* Nex free tier info */}
+                <div className="arcade-panel p-5 text-center space-y-3">
+                  <p className="pixel-font text-arcade-green text-[11px] tracking-wider">
+                    FREE TIER — POWERED BY NEX.AI
+                  </p>
+                  <p className="pixel-font text-white/50 text-[8px] tracking-wider">
+                    GEMINI 2.5 FLASH · 200 CALLS/DAY · NO API KEY NEEDED
+                  </p>
+                  <a
+                    href="https://trust.nex.ai"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block pixel-font text-[7px] px-3 py-1 border border-arcade-green/40 text-arcade-green/70 hover:text-arcade-green hover:border-arcade-green transition-colors"
+                  >
+                    SOC2 COMPLIANT ↗
+                  </a>
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      if (SHOW_INTEGRATIONS) {
+                        ArcadeSounds.select();
+                        ArcadeSounds.screenTransition();
+                        setScreen("powerups");
+                      } else {
+                        handleLaunch();
+                      }
+                    }}
+                    onMouseEnter={() => ArcadeSounds.buttonHover()}
+                    className="flex-1 pixel-font text-[10px] sm:text-xs py-4 transition-all duration-200 cursor-pointer bg-arcade-green text-black border-2 border-arcade-green hover:shadow-[0_0_16px_var(--arcade-green)] hover:scale-[1.02] active:scale-95"
+                  >
+                    {SHOW_INTEGRATIONS ? "NEXT" : "DEPLOY"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      ArcadeSounds.back();
+                      ArcadeSounds.screenTransition();
+                      setScreen("select");
+                      setApiKey("");
+                    }}
+                    onMouseEnter={() => ArcadeSounds.buttonHover()}
+                    className="arcade-btn text-arcade-pink px-6"
+                    style={{ borderColor: "var(--arcade-pink)" }}
+                  >
+                    BACK
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* API Key Input */}
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && apiKey.trim()) {
+                      if (SHOW_INTEGRATIONS) {
+                        ArcadeSounds.select();
+                        ArcadeSounds.screenTransition();
+                        setScreen("powerups");
+                      } else {
+                        handleLaunch();
+                      }
                     }
-                  `}
-                >
-                  {p.shortLabel}
-                </button>
-              ))}
-            </div>
+                  }}
+                  placeholder="sk-... (YOU KNOW THE DRILL)"
+                  className="arcade-input w-full py-3 px-4 text-sm"
+                  autoFocus
+                />
 
-            {/* API Key Input */}
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && apiKey.trim()) {
-                  if (SHOW_INTEGRATIONS) {
-                    ArcadeSounds.select();
-                    ArcadeSounds.screenTransition();
-                    setScreen("powerups");
-                  } else {
-                    handleLaunch();
-                  }
-                }
-              }}
-              placeholder="sk-... (YOU KNOW THE DRILL)"
-              className="arcade-input w-full py-3 px-4 text-sm"
-              autoFocus
-            />
-
-            {/* Actions */}
-            <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  if (!apiKey.trim()) return;
-                  if (SHOW_INTEGRATIONS) {
-                    ArcadeSounds.select();
-                    ArcadeSounds.screenTransition();
-                    setScreen("powerups");
-                  } else {
-                    handleLaunch();
-                  }
-                }}
-                onMouseEnter={() => ArcadeSounds.buttonHover()}
-                disabled={!apiKey.trim()}
-                className={`
-                  flex-1 pixel-font text-[10px] sm:text-xs py-4 transition-all duration-200 cursor-pointer
-                  ${
-                    apiKey.trim()
-                      ? "bg-arcade-green text-black border-2 border-arcade-green hover:shadow-[0_0_16px_var(--arcade-green)] hover:scale-[1.02] active:scale-95"
-                      : "arcade-panel text-white/30 cursor-not-allowed"
-                  }
-                `}
-              >
-                {SHOW_INTEGRATIONS ? "NEXT" : "DEPLOY"}
-              </button>
-              <button
-                onClick={() => {
-                  ArcadeSounds.back();
-                  ArcadeSounds.screenTransition();
-                  setScreen("select");
-                  setApiKey("");
-                }}
-                onMouseEnter={() => ArcadeSounds.buttonHover()}
-                className="arcade-btn text-arcade-pink px-6"
-                style={{ borderColor: "var(--arcade-pink)" }}
-              >
-                BACK
-              </button>
-            </div>
+                {/* Actions */}
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      if (!apiKey.trim()) return;
+                      if (SHOW_INTEGRATIONS) {
+                        ArcadeSounds.select();
+                        ArcadeSounds.screenTransition();
+                        setScreen("powerups");
+                      } else {
+                        handleLaunch();
+                      }
+                    }}
+                    onMouseEnter={() => ArcadeSounds.buttonHover()}
+                    disabled={!apiKey.trim()}
+                    className={`
+                      flex-1 pixel-font text-[10px] sm:text-xs py-4 transition-all duration-200 cursor-pointer
+                      ${
+                        apiKey.trim()
+                          ? "bg-arcade-green text-black border-2 border-arcade-green hover:shadow-[0_0_16px_var(--arcade-green)] hover:scale-[1.02] active:scale-95"
+                          : "arcade-panel text-white/30 cursor-not-allowed"
+                      }
+                    `}
+                  >
+                    {SHOW_INTEGRATIONS ? "NEXT" : "DEPLOY"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      ArcadeSounds.back();
+                      ArcadeSounds.screenTransition();
+                      setScreen("select");
+                      setApiKey("");
+                    }}
+                    onMouseEnter={() => ArcadeSounds.buttonHover()}
+                    className="arcade-btn text-arcade-pink px-6"
+                    style={{ borderColor: "var(--arcade-pink)" }}
+                  >
+                    BACK
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -2398,18 +2694,31 @@ export default function Home() {
         )}
       </main>
 
+      {/* ═══════ TEMPLATE DETAIL MODAL ═══════ */}
+      {templateModalPersona && (
+        <TemplateDetailModal
+          persona={templateModalPersona}
+          onClose={handleCloseTemplateModal}
+        />
+      )}
+
       {/* ═══════ FOOTER ═══════ */}
       <footer className="border-t border-white/10 px-4 py-4">
         <div className="max-w-4xl mx-auto flex flex-col items-center gap-2">
           <div className="flex items-center gap-4">
             {/* SOC2 Badge */}
-            <div className="flex items-center gap-1.5 px-2 py-1 border border-green-500/30 rounded bg-green-500/5">
+            <a
+              href="https://trust.nex.ai"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-2 py-1 border border-green-500/30 rounded bg-green-500/5 hover:border-green-500/50 hover:bg-green-500/10 transition-colors"
+            >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M12 2L3 7v5c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" fill="#22c55e" fillOpacity="0.3" stroke="#22c55e" strokeWidth="1.5"/>
                 <path d="M9 12l2 2 4-4" stroke="#22c55e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
-              <span className="pixel-font text-[6px] text-green-400/80 tracking-wider">SOC2 COMPLIANT</span>
-            </div>
+              <span className="pixel-font text-[6px] text-green-400/80 tracking-wider">SOC2 COMPLIANT ↗</span>
+            </a>
             <span className="text-white/15 text-[6px]" aria-hidden="true">{"\u2502"}</span>
             <p className="pixel-font text-[6px] text-white/25 tracking-wider">
               ISOLATED DOCKER CONTAINERS {"\u2022"} YOUR KEYS NEVER LEAVE YOUR INSTANCE

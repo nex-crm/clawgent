@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
+import { writeFileSync, mkdtempSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
 import { instances, type Instance, runCommand, runCommandSilent, reconcileWithDocker, findInstanceByUserId } from "@/lib/instances";
 import { PERSONA_CONFIGS } from "@/lib/personas";
 import { configureAgentPersona } from "@/lib/agent-config";
+import { checkRateLimit, incrementUsage } from "@/lib/rate-limit";
 
 const OPENCLAW_IMAGE = "clawgent-openclaw";
 const PORT_RANGE_START = 19000;
@@ -13,6 +17,7 @@ const PROVIDER_CONFIG: Record<string, { envVar: string; modelId: string }> = {
   anthropic: { envVar: "ANTHROPIC_API_KEY", modelId: "anthropic/claude-sonnet-4-5" },
   google:    { envVar: "GEMINI_API_KEY",    modelId: "google/gemini-3-flash-preview" },
   openai:    { envVar: "OPENAI_API_KEY",    modelId: "openai/gpt-5.2" },
+  nex:       { envVar: "GEMINI_API_KEY",    modelId: "google/gemini-2.5-flash" },
 };
 
 export async function POST(request: NextRequest) {
@@ -47,9 +52,9 @@ export async function POST(request: NextRequest) {
     const apiKey = body.apiKey as string | undefined;
     const persona = body.persona as string | undefined;
 
-    if (!provider || !apiKey) {
+    if (!provider) {
       return NextResponse.json(
-        { error: "Both provider and apiKey are required" },
+        { error: "provider is required" },
         { status: 400 },
       );
     }
@@ -60,6 +65,41 @@ export async function POST(request: NextRequest) {
         { error: `Unknown provider: ${provider}. Valid: ${Object.keys(PROVIDER_CONFIG).join(", ")}` },
         { status: 400 },
       );
+    }
+
+    // Determine the actual API key and any extra env vars for the container
+    let resolvedApiKey: string;
+    const extraEnvVars: Record<string, string> = {};
+
+    if (provider === "nex") {
+      // Free Nex tier: use shared server-side Gemini key, enforce rate limit
+      const sharedGeminiKey = process.env.NEX_SHARED_GEMINI_KEY;
+      if (!sharedGeminiKey) {
+        return NextResponse.json(
+          { error: "Free tier is not configured on this server" },
+          { status: 503 },
+        );
+      }
+
+      const { allowed, remaining } = checkRateLimit(userId);
+      if (!allowed) {
+        return NextResponse.json(
+          { error: "Daily free tier limit reached (200 calls/day). Try again tomorrow or use your own API key.", remaining },
+          { status: 429 },
+        );
+      }
+
+      incrementUsage(userId, new Date().toISOString().split("T")[0]);
+      resolvedApiKey = sharedGeminiKey;
+    } else {
+      // BYOK providers require an API key
+      if (!apiKey) {
+        return NextResponse.json(
+          { error: "apiKey is required for this provider" },
+          { status: 400 },
+        );
+      }
+      resolvedApiKey = apiKey;
     }
 
     // Allocate a unique port
@@ -90,7 +130,7 @@ export async function POST(request: NextRequest) {
     if (persona) addLog(instance, `Pre-loading agent template: ${persona}. Skills included.`);
 
     // Run deployment asynchronously
-    deployInstance(instance, volumeName, config.envVar, apiKey, config.modelId).catch((err) => {
+    deployInstance(instance, volumeName, config.envVar, resolvedApiKey, config.modelId, extraEnvVars).catch((err) => {
       instance.status = "error";
       addLog(instance, `Fatal error: ${err.message}`);
     });
@@ -132,27 +172,39 @@ async function deployInstance(
   apiKeyEnvVar: string,
   apiKey: string,
   modelId: string,
+  extraEnvVars: Record<string, string> = {},
 ) {
   try {
     // Step 1: Pull image if needed
     addLog(instance, `Image: ${OPENCLAW_IMAGE} (pre-built, no pulling required)`);
     addLog(instance, `Model: ${modelId} (the brains of the operation)`);
 
-    // Step 2: Create and start container with LLM API key injected
+    // Step 2: Create and start container
     addLog(instance, `Starting instance on port ${instance.port}... (it gets its own sandbox, very fancy)`);
-    await runCommand("docker", [
+    const isNexProvider = instance.provider === "nex";
+    const dockerArgs = [
       "run", "-d",
       "--name", instance.containerName,
       "-p", `${instance.port}:18789`,
       "-v", `${volumeName}:/home/node/.openclaw`,
       "-e", `OPENCLAW_GATEWAY_TOKEN=${instance.token}`,
       "-e", "PORT=18789",
-      "-e", `${apiKeyEnvVar}=${apiKey}`,
+    ];
+    // For BYOK providers, inject API key as env var (user's own key, they know it)
+    // For nex (free tier), key is injected into openclaw.json after boot to hide from `env`
+    if (!isNexProvider) {
+      dockerArgs.push("-e", `${apiKeyEnvVar}=${apiKey}`);
+    }
+    for (const [key, value] of Object.entries(extraEnvVars)) {
+      dockerArgs.push("-e", `${key}=${value}`);
+    }
+    dockerArgs.push(
       "--restart", "unless-stopped",
       OPENCLAW_IMAGE,
       "bash", "-lc",
       "openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan",
-    ]);
+    );
+    await runCommand("docker", dockerArgs);
     addLog(instance, "Instance is up. Now we wait for it to get its act together.");
 
     // Step 3: Wait for gateway to become healthy
@@ -160,7 +212,44 @@ async function deployInstance(
     const healthy = await waitForHealth(instance, 60);
 
     if (healthy) {
-      // Step 4: Set the default model inside the container
+      // Step 4a: For free tier, inject API key into openclaw.json (not env vars, so `env` can't expose it)
+      if (isNexProvider) {
+        addLog(instance, "Injecting API key into instance config... (hidden from env)");
+        try {
+          const configPath = "/home/node/.openclaw/openclaw.json";
+          // Read existing config (may not exist yet)
+          let existingConfig: Record<string, unknown> = {};
+          try {
+            const raw = await runCommandSilent("docker", [
+              "exec", instance.containerName, "cat", configPath,
+            ]);
+            existingConfig = JSON.parse(raw);
+          } catch {
+            // Config file doesn't exist yet — start fresh
+          }
+          // Merge the Gemini API key into the config
+          const keys = (existingConfig.keys || {}) as Record<string, string>;
+          keys[apiKeyEnvVar] = apiKey;
+          existingConfig.keys = keys;
+          // Write back
+          const tmpDir = mkdtempSync(join(tmpdir(), "clawgent-cfg-"));
+          try {
+            const localConfigPath = join(tmpDir, "openclaw.json");
+            writeFileSync(localConfigPath, JSON.stringify(existingConfig, null, 2));
+            await runCommand("docker", [
+              "cp", localConfigPath, `${instance.containerName}:${configPath}`,
+            ]);
+          } finally {
+            rmSync(tmpDir, { recursive: true, force: true });
+          }
+          addLog(instance, "API key configured securely.");
+        } catch (cfgErr) {
+          const msg = cfgErr instanceof Error ? cfgErr.message : String(cfgErr);
+          addLog(instance, `Warning: failed to inject API key into config (${msg}).`);
+        }
+      }
+
+      // Step 4b: Set the default model inside the container
       addLog(instance, `Setting default model to ${modelId}... (plugging in the brain)`);
       try {
         await runCommand("docker", [

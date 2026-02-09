@@ -6,7 +6,9 @@ import {
   dbDeleteInstance,
   dbCount,
   dbGetAllIds,
-  dbGetInstanceByUserId,
+  dbGetInstanceByUserIdActive,
+  dbGetOrphanedInstances,
+  dbDeleteOldStaleInstances,
 } from "./db";
 
 export interface Instance {
@@ -151,9 +153,15 @@ class InstanceStore {
   }
 }
 
-// Singleton: survive Next.js hot reloads via globalThis
+// Singleton: survive Next.js hot reloads via globalThis.
+// IMPORTANT: Do NOT use `instanceof InstanceStore` here. In dev mode, Next.js
+// HMR re-evaluates this module, creating a new InstanceStore class object.
+// `instanceof` would fail against the old singleton (different class identity),
+// causing a new store to be created that loses in-memory state from the async
+// deployInstance function. This was the root cause of deployments appearing
+// stuck: the deploy mutated the old store's object, but API reads hit the new store.
 const g = globalThis as unknown as { __clawgent_instances?: InstanceStore };
-if (!g.__clawgent_instances || !(g.__clawgent_instances instanceof InstanceStore)) {
+if (!g.__clawgent_instances) {
   g.__clawgent_instances = new InstanceStore();
 }
 export const instances = g.__clawgent_instances;
@@ -173,11 +181,9 @@ export async function reconcileWithDocker(): Promise<void> {
       "--filter", `name=${CONTAINER_PREFIX}`,
       "--format", "{{.Names}}\t{{.Status}}\t{{.Ports}}",
     ]);
-    if (!output.trim()) return;
-
     const knownIds = new Set(instances.keys());
 
-    for (const line of output.trim().split("\n")) {
+    for (const line of (output.trim() ? output.trim().split("\n") : [])) {
       const [name, dockerStatus, ports] = line.split("\t");
       if (!name?.startsWith(CONTAINER_PREFIX)) continue;
 
@@ -217,6 +223,47 @@ export async function reconcileWithDocker(): Promise<void> {
       };
 
       instances.set(id, instance);
+    }
+
+    // Clean up orphaned DB records: instances in DB but not running in Docker
+    const runningContainerIds = new Set<string>();
+    for (const line of (output.trim() ? output.trim().split("\n") : [])) {
+      const [name] = line.split("\t");
+      if (name?.startsWith(CONTAINER_PREFIX)) {
+        runningContainerIds.add(name.replace(CONTAINER_PREFIX, ""));
+      }
+    }
+
+    // Mark DB instances as stopped if their container is no longer running
+    const allDbInstances = dbGetAllInstances();
+    for (const inst of allDbInstances) {
+      if ((inst.status === "running" || inst.status === "starting") && !runningContainerIds.has(inst.id)) {
+        inst.status = "stopped";
+        inst.dashboardUrl = null;
+        dbUpsertInstance(inst);
+        // Also update cache if present
+        const cached = instances.get(inst.id);
+        if (cached) {
+          cached.status = "stopped";
+          cached.dashboardUrl = null;
+        }
+        console.log(`[reconcile] Marked instance ${inst.id} as stopped (container not running)`);
+      }
+    }
+
+    // Delete stale instances (error/stopped) older than 1 hour
+    // First, collect IDs to evict from cache
+    const staleToEvict = dbGetOrphanedInstances()
+      .filter(inst => inst.createdAt < new Date(Date.now() - 60 * 60 * 1000).toISOString())
+      .map(inst => inst.id);
+
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const deleted = dbDeleteOldStaleInstances(oneHourAgo);
+    if (deleted > 0) {
+      console.log(`[reconcile] Cleaned up ${deleted} stale instance(s) older than 1 hour`);
+      for (const id of staleToEvict) {
+        instances.delete(id);
+      }
     }
   } catch {
     // Docker not available or command failed — nothing to reconcile
@@ -261,14 +308,14 @@ export function runCommand(cmd: string, args: string[]): Promise<string> {
   });
 }
 
-/** Find the instance belonging to a given user (at most one). */
+/** Find the active instance belonging to a given user (at most one). */
 export function findInstanceByUserId(userId: string): Instance | undefined {
-  // Check cache first (via instances.values()), then DB
+  // Check cache first, only return running/starting instances
   for (const inst of instances.values()) {
-    if (inst.userId === userId) return inst;
+    if (inst.userId === userId && (inst.status === "running" || inst.status === "starting")) return inst;
   }
-  // Also check DB directly (in case cache doesn't have it)
-  return dbGetInstanceByUserId(userId);
+  // Also check DB directly for active instances only
+  return dbGetInstanceByUserIdActive(userId);
 }
 
 export function runCommandSilent(cmd: string, args: string[]): Promise<string> {
