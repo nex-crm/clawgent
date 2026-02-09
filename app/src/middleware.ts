@@ -6,10 +6,17 @@ const isWorkOSConfigured =
   !!process.env.WORKOS_API_KEY &&
   !!process.env.WORKOS_COOKIE_PASSWORD;
 
+const denyAllInProd =
+  process.env.NODE_ENV === "production" && !isWorkOSConfigured;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let cachedMiddleware: ((req: NextRequest, event: NextFetchEvent) => any) | null = null;
 
 export default async function middleware(req: NextRequest, event: NextFetchEvent) {
+  if (denyAllInProd) {
+    return new NextResponse("Service misconfigured", { status: 503 });
+  }
+
   if (!isWorkOSConfigured) {
     // Dev mode: pass all requests through
     return NextResponse.next();
@@ -26,8 +33,6 @@ export default async function middleware(req: NextRequest, event: NextFetchEvent
           "/auth/callback",
           // OpenClaw proxy paths — must remain accessible after initial auth redirect
           "/i/:path*",
-          // LLM proxy — containers authenticate via instance token, not WorkOS
-          "/api/llm-proxy/:path*",
         ],
       },
     });
