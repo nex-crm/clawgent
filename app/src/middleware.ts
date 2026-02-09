@@ -26,6 +26,8 @@ export default async function middleware(req: NextRequest, event: NextFetchEvent
           "/auth/callback",
           // OpenClaw proxy paths — must remain accessible after initial auth redirect
           "/i/:path*",
+          // LLM proxy — containers authenticate via instance token, not WorkOS
+          "/api/llm-proxy/:path*",
         ],
       },
     });

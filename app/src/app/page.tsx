@@ -166,7 +166,7 @@ const PROVIDERS: {
     value: "nex",
     label: "Free via Nex.ai",
     shortLabel: "FREE",
-    model: "google/gemini-2.5-flash",
+    model: "openai/gemini-2.5-flash",
   },
 ];
 
@@ -582,7 +582,7 @@ export default function Home() {
   // Clicking the same pinned cell again triggers the action (deploy/select).
   const [pinnedPersona, setPinnedPersona] = useState<Persona | null>(null);
   const [selectedProvider, setSelectedProvider] =
-    useState<Provider>("anthropic");
+    useState<Provider>("nex");
   const [apiKey, setApiKey] = useState("");
 
   // Channel integrations (power-ups)
@@ -1021,7 +1021,7 @@ export default function Home() {
     ArcadeSounds.select();
     setSelectedPersona(null);
     setPinnedPersona(null);
-    setSelectedProvider("anthropic");
+    setSelectedProvider("nex");
     setScreen("apikey");
     ArcadeSounds.screenTransition();
   }
@@ -2141,6 +2141,20 @@ export default function Home() {
 
             {/* Provider Selector */}
             <div className="flex flex-col gap-2">
+              {/* Free tier — full-width primary option */}
+              <button
+                onClick={() => setSelectedProvider("nex")}
+                className={`
+                  w-full pixel-font text-[9px] sm:text-[10px] py-3 px-2 cursor-pointer
+                  ${
+                    selectedProvider === "nex"
+                      ? "bg-arcade-green text-black border-2 border-arcade-green"
+                      : "arcade-panel text-arcade-green/70 hover:text-arcade-green"
+                  }
+                `}
+              >
+                FREE via Nex.ai
+              </button>
               {/* BYOK providers — 3-column row */}
               <div className="grid grid-cols-3 gap-2">
                 {PROVIDERS.filter((p) => p.value !== "nex").map((p) => (

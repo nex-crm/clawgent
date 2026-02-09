@@ -6,6 +6,16 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // Authenticate the user
+  let userId: string;
+  if (isWorkOSConfigured) {
+    const { withAuth } = await import("@workos-inc/authkit-nextjs");
+    const session = await withAuth({ ensureSignedIn: true });
+    userId = session.user.id;
+  } else {
+    userId = DEV_USER_ID;
+  }
+
   const { id } = await params;
   let instance = instances.get(id);
 
@@ -20,11 +30,17 @@ export async function GET(
     return NextResponse.json({ error: "Instance not found" }, { status: 404 });
   }
 
+  // Only allow the owner to view their instance details
+  if (instance.userId && instance.userId !== userId) {
+    return NextResponse.json(
+      { error: "You can only view your own instances" },
+      { status: 403 },
+    );
+  }
+
   return NextResponse.json({
     id: instance.id,
     status: instance.status,
-    port: instance.port,
-    token: instance.token,
     dashboardUrl: instance.dashboardUrl,
     createdAt: instance.createdAt,
     logs: instance.logs,
