@@ -675,7 +675,6 @@ export default function Home() {
   function handlePersonaSelect(persona: Persona) {
     ArcadeSounds.select();
     setSelectedPersona(persona);
-    setExpandedSkill(null);
     setSelectedProvider(persona.recommendedModel);
     setScreen("apikey");
     ArcadeSounds.screenTransition();
@@ -916,7 +915,6 @@ export default function Home() {
       if (newIndex !== gridIndex) {
         setGridIndex(newIndex);
         setHoveredPersona(PERSONAS[newIndex]);
-        setExpandedSkill(null);
         playCursorMove();
       }
     }
@@ -1852,7 +1850,6 @@ export default function Home() {
               playCursorMove();
               setHoveredPersona(persona);
               setGridIndex(index);
-              setExpandedSkill(null);
             },
             onCellLeave: () => setHoveredPersona(null),
             onActionClick: (persona) => handlePersonaSelect(persona),
