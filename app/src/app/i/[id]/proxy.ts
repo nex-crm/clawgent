@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { instances, reconcileWithDocker } from "@/lib/instances";
+import { instances, reconcileWithDocker, startPairingAutoApprover } from "@/lib/instances";
 
 export async function proxyRequest(
   request: NextRequest,
@@ -15,6 +15,10 @@ export async function proxyRequest(
   if (!instance || instance.status !== "running") {
     return new NextResponse("Instance not found or not running", { status: 404 });
   }
+
+  // Ensure auto-approver is running for this instance on every visit.
+  // Deduplicates internally — no-op if already active.
+  startPairingAutoApprover(instance);
 
   // For root dashboard path without token: redirect to include ?token=
   // OpenClaw natively reads ?token= from URL and applies it to settings.
