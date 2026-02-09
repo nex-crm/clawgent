@@ -83,14 +83,11 @@ export async function proxyRequest(
         const host = request.headers.get("host") || "localhost:3001";
         const gatewayUrl = `${wsProto}://${host}/i/${id}/`;
 
-        // Clear ALL openclaw* localStorage keys and set fresh values.
-        // Sets both gatewayUrl AND token directly — no dependency on
-        // OpenClaw reading ?token= from URL.
+        // Set gatewayUrl and token without clearing device identity keys.
+        // OpenClaw stores device keypairs in localStorage — wiping them
+        // forces a new pairing request on every page refresh.
         const settingsScript = `<script>
 (function() {
-  Object.keys(localStorage).forEach(function(k) {
-    if (k.startsWith("openclaw")) localStorage.removeItem(k);
-  });
   localStorage.setItem("openclaw.control.settings.v1", JSON.stringify({
     gatewayUrl: "${gatewayUrl}",
     token: "${instance.token}"
