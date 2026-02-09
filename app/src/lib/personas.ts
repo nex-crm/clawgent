@@ -28,6 +28,87 @@ export interface PersonaConfig {
   heartbeatInterval: string;
 }
 
+/** Nex CRM Context Graph skill — shared across all persona templates */
+const NEX_SKILL: SkillConfig = {
+  name: "nex",
+  description: "Access your Nex CRM Context Graph — query entities, process conversations, and receive real-time insights",
+  emoji: "\uD83D\uDCCA",
+  requires: { env: ["NEX_API_KEY"] },
+  source: "GitHub",
+  sourceUrl: "https://github.com/nex-crm/nex-as-a-skill",
+  instructions: `# Nex - Context Graph for OpenClaw
+
+Give your AI agent memory and context awareness. Nex provides a Context Graph that captures relationships, insights, and signals from your conversations.
+
+## Setup
+
+1. Get your API key from https://app.nex.ai/settings/developer
+2. Add to \\\`~/.openclaw/openclaw.json\\\`:
+   \\\`\\\`\\\`json
+   {
+     "skills": {
+       "entries": {
+         "nex": {
+           "enabled": true,
+           "env": {
+             "NEX_API_KEY": "nex_dev_your_key_here"
+           }
+         }
+       }
+     }
+   }
+   \\\`\\\`\\\`
+
+## How to Make API Calls
+
+**CRITICAL**: The Nex API can take 10-60 seconds to respond. You MUST set \\\`timeout: 120\\\` on the exec tool call.
+
+## Capabilities
+
+### Query Context (Ask API)
+
+Use this when you need to recall information about contacts, companies, or relationships.
+
+**Endpoint**: \\\`POST https://app.nex.ai/api/developers/v1/context/ask\\\`
+
+**How to call** (use exec tool with timeout: 120):
+\\\`\\\`\\\`json
+{
+  "tool": "exec",
+  "command": "curl -s -X POST 'https://app.nex.ai/api/developers/v1/context/ask' -H 'Authorization: Bearer $NEX_API_KEY' -H 'Content-Type: application/json' -d '{\\\\\"query\\\\\":\\\\\"What do I know about this contact?\\\\\"}'",
+  "timeout": 120
+}
+\\\`\\\`\\\`
+
+**Example queries**:
+- "Who are my most engaged contacts this week?"
+- "What companies are we working with in healthcare?"
+- "What was discussed in my last meeting with Sarah?"
+
+### Add Context (ProcessText API)
+
+Use this to ingest new information from conversations, meeting notes, or other text.
+
+**Endpoint**: \\\`POST https://app.nex.ai/api/developers/v1/context/text\\\`
+
+### Get Artifact Status (After ProcessText)
+
+**Endpoint**: \\\`GET https://app.nex.ai/api/developers/v1/context/artifacts/{artifact_id}\\\`
+
+### Real-time Insight Stream (SSE)
+
+**Endpoint**: \\\`GET https://app.nex.ai/api/developers/v1/insights/stream\\\`
+
+## Error Handling
+
+| Status Code | Meaning |
+|-------------|---------|
+| 401 | Invalid or expired API key |
+| 403 | Insufficient scope |
+| 429 | Rate limited |
+| 500 | Server error |`,
+};
+
 export const PERSONA_CONFIGS: Record<string, PersonaConfig> = {
   "marketing-pro": {
     name: "Marketing Pro",
@@ -3645,6 +3726,663 @@ Create personalized multi-channel outreach sequences.
 ## Output
 Save sequence to \`./outreach/{prospect-name}/sequence.md\``,
       },
+      {
+        name: "deal-pipeline-tracker",
+        description: "Track deals through pipeline stages, flag stale opportunities, and recommend next actions to advance each deal.",
+        emoji: "\uD83D\uDCCA",
+        source: "GitHub",
+        sourceUrl: "https://github.com/twentyhq/twenty",
+        instructions: `# Deal Pipeline Tracker
+
+Track, analyze, and advance deals across your sales pipeline.
+
+## When to Use
+- Reviewing current pipeline health
+- Identifying stalled deals that need attention
+- Planning weekly pipeline review meetings
+- Forecasting revenue for the quarter
+
+## Pipeline Stages
+
+| Stage | Definition | Key Actions |
+|-------|-----------|-------------|
+| Prospecting | Initial outreach, no engagement yet | Send intro sequence, research |
+| Discovery | First meeting scheduled or completed | Qualify needs, map stakeholders |
+| Demo/Evaluation | Active evaluation of your solution | Demo, POC, trial setup |
+| Proposal | Pricing and terms under discussion | Send proposal, handle objections |
+| Negotiation | Contract terms being finalized | Legal review, procurement process |
+| Closed Won | Deal signed | Onboarding handoff |
+| Closed Lost | Deal did not close | Log reason, set re-engagement date |
+
+## Workflow
+
+1. Load pipeline data from \\\`./pipeline/deals.csv\\\` or user input
+2. For each deal, assess:
+   - **Days in current stage** — flag if over threshold (Discovery >14d, Demo >21d, Proposal >10d, Negotiation >14d)
+   - **Last activity date** — flag if no activity in 7+ days
+   - **Next step clarity** — does the deal have a defined next action?
+   - **Decision maker access** — are we talking to the right person?
+3. Generate a pipeline summary:
+   - Total pipeline value by stage
+   - Deals at risk (stalled, no next step, single-threaded)
+   - Weighted forecast (stage probability x deal value)
+   - Top 3 deals to focus on this week
+4. Recommend specific next actions for each at-risk deal
+
+## Deal Health Scoring
+
+| Factor | Healthy | At Risk | Critical |
+|--------|---------|---------|----------|
+| Stage velocity | On track | 1.5x avg | 2x+ avg |
+| Stakeholder access | Multi-threaded | Single contact | Contact ghosting |
+| Next step | Clear, scheduled | Vague | None defined |
+| Champion | Identified, active | Passive | No champion |
+
+## Output
+Save pipeline report to \\\`./pipeline/review-{date}.md\\\``,
+      },
+      {
+        name: "call-prep-briefing",
+        description: "Generate pre-call briefings with prospect context, talking points, questions to ask, and objection responses.",
+        emoji: "\uD83D\uDCDE",
+        source: "GitHub",
+        sourceUrl: "https://github.com/twentyhq/twenty",
+        instructions: `# Call Prep Briefing
+
+Generate comprehensive pre-call briefings so you walk into every meeting prepared.
+
+## When to Use
+- Before discovery calls with new prospects
+- Before demo presentations
+- Before negotiation or closing calls
+- Before quarterly business reviews
+
+## Briefing Template
+
+### 1. Prospect Snapshot
+- **Company**: Name, size, industry, HQ, recent news
+- **Contact**: Name, title, LinkedIn summary, tenure, previous companies
+- **Relationship history**: Previous emails, meetings, touchpoints
+
+### 2. Situation Assessment
+- **Why they took the meeting**: What triggered interest?
+- **Known pain points**: From discovery or research
+- **Current solution**: What are they using today? Why might they switch?
+- **Budget signals**: Funding stage, company size, tech spend indicators
+
+### 3. Talking Points (3-5)
+- Lead with their specific problem, not your features
+- Reference something specific to their business (recent news, job posting, product launch)
+- Connect your solution to their measurable outcomes
+
+### 4. Questions to Ask
+- Open-ended discovery questions (what, how, tell me about)
+- Qualifying questions (timeline, budget, decision process)
+- Pain amplification questions (what happens if you don't solve this?)
+
+### 5. Likely Objections & Responses
+
+| Objection | Response Framework |
+|-----------|-------------------|
+| "Too expensive" | Reframe to ROI and cost of inaction |
+| "We're happy with current solution" | Probe for hidden pain, ask about gaps |
+| "Need to involve others" | Map the buying committee, offer to present |
+| "Not the right time" | Anchor to their timeline triggers |
+| "We can build this in-house" | Compare TCO, time-to-value, opportunity cost |
+
+### 6. Meeting Objectives
+- Primary goal (what must happen for this to be a successful call)
+- Secondary goal (fallback outcome)
+- Next step to propose at the end of the call
+
+## Output
+Save to \\\`./briefings/{prospect-name}-{date}.md\\\``,
+      },
+      {
+        name: "competitive-intel",
+        description: "Research competitors, build battle cards, and generate positioning strategies against specific rivals.",
+        emoji: "\u2694\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/0xmetaschool/competitor-analyst",
+        requires: { bins: ["curl"] },
+        instructions: `# Competitive Intelligence
+
+Research competitors and build actionable battle cards for the sales team.
+
+## When to Use
+- Prospect mentions a competitor
+- Preparing for a competitive deal
+- Updating quarterly competitive landscape
+- New competitor enters the market
+
+## Battle Card Framework
+
+### Competitor Overview
+- Company name, founded, HQ, funding, employee count
+- Target market and ICP overlap with yours
+- Pricing model and approximate ranges
+- Key customers and logos
+
+### Feature Comparison Matrix
+
+| Capability | Us | Competitor | Advantage |
+|-----------|-----|-----------|-----------|
+| Feature A | Yes | Partial | Ours is deeper because... |
+| Feature B | No | Yes | Roadmap Q3, workaround is... |
+| Pricing | $X/mo | $Y/mo | We offer more value per $ |
+
+### Competitive Positioning
+
+**When we win against them:**
+- Specific scenarios where we're the better choice
+- Customer quotes or proof points
+
+**When we lose against them:**
+- Where they genuinely have an edge
+- How to mitigate or reframe
+
+**Landmines to set:**
+- Questions to ask the prospect that expose competitor weaknesses
+- Features to demo that highlight our differentiation
+
+### Objection Handling
+
+For each competitor-specific objection:
+1. **Acknowledge** — Don't dismiss the competitor
+2. **Reframe** — Shift the evaluation criteria to your strengths
+3. **Evidence** — Provide proof (case study, data, demo)
+
+## Research Sources
+- Competitor website, pricing page, changelog
+- G2, Capterra, TrustRadius reviews
+- Job postings (reveal tech stack, priorities)
+- Press releases and blog posts
+- Social media mentions and complaints
+
+## Output
+Save to \\\`./competitive/{competitor-name}-battlecard.md\\\``,
+      },
+      {
+        name: "crm-data-hygiene",
+        description: "Audit CRM data for duplicates, missing fields, stale contacts, and data quality issues with cleanup recommendations.",
+        emoji: "\uD83E\uDDF9",
+        source: "GitHub",
+        sourceUrl: "https://github.com/twentyhq/twenty",
+        instructions: `# CRM Data Hygiene
+
+Audit and clean CRM data to ensure pipeline accuracy and outreach effectiveness.
+
+## When to Use
+- Before importing new lead lists
+- Monthly data quality reviews
+- When pipeline reporting looks unreliable
+- Before launching outbound campaigns
+
+## Audit Checklist
+
+### 1. Duplicate Detection
+- Same email across multiple records
+- Same company name with slight variations (Inc vs Inc. vs Incorporated)
+- Same person at different companies (job change, not updated)
+
+### 2. Missing Critical Fields
+
+| Field | Impact if Missing |
+|-------|------------------|
+| Email | Cannot reach contact |
+| Company | Cannot segment or report |
+| Title/Role | Cannot qualify or route |
+| Phone | Cannot call, limits channels |
+| Industry | Cannot segment campaigns |
+| Deal value | Pipeline forecast unreliable |
+| Last activity | Cannot identify stale records |
+
+### 3. Stale Records
+- Contacts with no activity in 90+ days
+- Deals stuck in same stage for 30+ days
+- Companies with no associated contacts
+- Bounced emails still marked as valid
+
+### 4. Data Standardization
+- Job titles: normalize variations (VP Sales = Vice President of Sales = VP, Sales)
+- Industry categories: map to standard taxonomy
+- Company names: remove extra whitespace, fix capitalization
+- Phone numbers: standardize format
+- Addresses: validate and standardize
+
+## Workflow
+1. Export or load CRM data
+2. Run each audit check
+3. Generate findings report with counts and examples
+4. Prioritize fixes by impact (deals affected, revenue at risk)
+5. Produce cleanup action list
+
+## Output
+- Audit report: \\\`./crm/hygiene-audit-{date}.md\\\`
+- Duplicates list: \\\`./crm/duplicates-{date}.csv\\\`
+- Cleanup actions: \\\`./crm/cleanup-actions-{date}.csv\\\``,
+      },
+      {
+        name: "sales-forecast",
+        description: "Build weighted pipeline forecasts with scenario analysis, risk factors, and confidence intervals.",
+        emoji: "\uD83D\uDD2E",
+        source: "GitHub",
+        sourceUrl: "https://github.com/facebook/prophet",
+        instructions: `# Sales Forecast
+
+Build data-driven sales forecasts with scenario modeling and risk analysis.
+
+## When to Use
+- Weekly/monthly forecast submissions
+- Board or leadership reporting
+- Quota planning and territory analysis
+- End-of-quarter commit calls
+
+## Forecast Methodology
+
+### Weighted Pipeline
+Assign probability to each pipeline stage:
+
+| Stage | Default Probability | Notes |
+|-------|-------------------|-------|
+| Prospecting | 5% | Very early, low confidence |
+| Discovery | 15% | Qualified interest |
+| Demo/Eval | 30% | Active evaluation |
+| Proposal | 50% | Pricing discussion |
+| Negotiation | 75% | Terms under review |
+| Verbal Commit | 90% | Awaiting signature |
+
+**Weighted value** = Deal value x Stage probability
+
+### Scenario Analysis
+- **Best case**: Sum of all pipeline weighted values + upside deals
+- **Most likely**: Weighted pipeline minus at-risk deals
+- **Worst case**: Only deals in Negotiation+ stages
+- **Commit**: Only deals you would stake your job on
+
+### Risk Adjustments
+Apply multipliers for risk factors:
+
+| Risk Factor | Adjustment |
+|------------|-----------|
+| Single-threaded (no champion) | 0.7x |
+| Stalled 14+ days | 0.6x |
+| No defined next step | 0.5x |
+| Competitor actively engaged | 0.8x |
+| New logo (no relationship) | 0.8x |
+| Long sales cycle (>90 days) | 0.7x |
+
+## Workflow
+1. Pull current pipeline data
+2. Apply weighted probabilities by stage
+3. Apply risk adjustments per deal
+4. Generate scenario analysis (best/likely/worst/commit)
+5. Compare to quota and identify gap
+6. Recommend gap-closing actions
+
+## Output
+Save to \\\`./forecasts/forecast-{period}.md\\\` with summary table, deal-level detail, and gap analysis`,
+      },
+      {
+        name: "objection-handler",
+        description: "Generate responses to common sales objections using proven frameworks like Feel-Felt-Found and reframing.",
+        emoji: "\uD83D\uDEE1\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/therealcrowder/SalesOperations",
+        instructions: `# Objection Handler
+
+Generate effective responses to sales objections using proven frameworks.
+
+## When to Use
+- Preparing for objection-heavy calls (pricing, competitive, executive)
+- Training new sales reps
+- Building objection response playbooks
+- After losing a deal — analyze what objections weren't handled well
+
+## Objection Categories
+
+### Price Objections
+- "It's too expensive"
+- "We don't have budget this quarter"
+- "Competitor X is cheaper"
+- "Can you offer a discount?"
+
+### Timing Objections
+- "Not the right time"
+- "We're in a contract with another vendor"
+- "Let's revisit next quarter"
+- "We have bigger priorities right now"
+
+### Authority Objections
+- "I need to run this by my boss"
+- "Our procurement process takes 6 months"
+- "The decision isn't mine alone"
+
+### Need Objections
+- "We're fine with what we have"
+- "We can build this ourselves"
+- "I don't see the value"
+
+### Trust Objections
+- "We've never heard of your company"
+- "How do we know you'll be around in 2 years?"
+- "We got burned by a similar product before"
+
+## Response Frameworks
+
+### Feel-Felt-Found
+"I understand how you feel. Other [similar companies] felt the same way. What they found was..."
+
+### Isolate and Address
+"If we could solve [objection], would everything else look good?" — Then address the isolated concern.
+
+### Reframe
+Shift the criteria. "The question isn't whether $X/mo is expensive — it's whether the $Y you lose monthly without this is acceptable."
+
+### Third-Party Proof
+"[Customer in similar situation] had the same concern. Here's what happened after they moved forward..."
+
+## Workflow
+1. User provides the specific objection or objection category
+2. Analyze the context (deal stage, prospect profile, product fit)
+3. Generate 2-3 response options using different frameworks
+4. Include follow-up questions to keep the conversation moving
+5. Suggest preemptive tactics (address objection before it comes up)
+
+## Output
+Save playbook to \\\`./playbooks/objection-responses.md\\\``,
+      },
+      {
+        name: "win-loss-analysis",
+        description: "Analyze closed deals to extract patterns on why you win or lose, with actionable insights for improvement.",
+        emoji: "\uD83C\uDFC6",
+        source: "GitHub",
+        sourceUrl: "https://github.com/twentyhq/twenty",
+        instructions: `# Win/Loss Analysis
+
+Analyze closed deals to identify patterns and improve win rates.
+
+## When to Use
+- After closing or losing a significant deal
+- Quarterly win/loss reviews
+- When win rates drop below target
+- Onboarding new sales reps (learn from history)
+
+## Analysis Framework
+
+### Deal Information
+- Company, deal size, sales cycle length
+- Competitors involved
+- Key stakeholders and decision makers
+- Products/features evaluated
+
+### Win Analysis
+For each won deal, capture:
+- **Primary reason for winning**: What tipped the scale?
+- **Key differentiator**: What did they choose us for?
+- **Champion profile**: Who advocated internally?
+- **Sales process**: What did we do right?
+- **Timeline**: How long from first touch to close?
+- **Triggers**: What event prompted the purchase?
+
+### Loss Analysis
+For each lost deal, capture:
+- **Primary reason for losing**: Price? Product gap? Timing? Competitor?
+- **Where it broke down**: Which stage did we stall or lose?
+- **Competitor chosen**: Who did they pick and why?
+- **What we could have done differently**: Specific actions
+- **Recovery opportunity**: Can we re-engage? When?
+
+### Pattern Detection
+
+| Pattern | What to Look For |
+|---------|-----------------|
+| ICP alignment | Do we win more in certain industries/sizes? |
+| Sales cycle | Are faster deals more likely to close? |
+| Stakeholders | Do multi-threaded deals win more? |
+| Features | Which features close deals vs. lose them? |
+| Pricing | Is there a sweet spot where we win most? |
+| Competitor | Against whom do we win/lose most? |
+
+## Workflow
+1. Collect deal data (won and lost) for the analysis period
+2. Code each deal with win/loss reasons
+3. Run pattern analysis across dimensions
+4. Generate insights with specific recommendations
+5. Create action items for sales process improvement
+
+## Output
+Save to \\\`./analysis/win-loss-{period}.md\\\``,
+      },
+      {
+        name: "territory-planner",
+        description: "Define sales territories, assign accounts, balance workload, and track territory coverage metrics.",
+        emoji: "\uD83D\uDDFA\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/twentyhq/twenty",
+        instructions: `# Territory Planner
+
+Design balanced sales territories and optimize account assignment.
+
+## When to Use
+- Annual or quarterly territory planning
+- Adding new reps and redistributing accounts
+- Entering new markets or segments
+- Rebalancing after uneven performance
+
+## Territory Design Criteria
+
+### Segmentation Dimensions
+- **Geography**: Region, state, metro area, timezone
+- **Industry vertical**: Healthcare, fintech, e-commerce, etc.
+- **Company size**: SMB (<100), Mid-Market (100-1000), Enterprise (1000+)
+- **Revenue potential**: Based on TAM and propensity to buy
+- **Named accounts**: Strategic accounts assigned regardless of other criteria
+
+### Balance Factors
+
+| Factor | Target | Why |
+|--------|--------|-----|
+| Account count | Even within 15% | Workload balance |
+| Revenue potential | Even within 20% | Fair quota distribution |
+| Existing relationships | Preserve where possible | Continuity matters |
+| Growth opportunity | Mix of established + greenfield | Balanced risk |
+
+## Workflow
+1. Gather account data: company, industry, size, location, current owner, revenue history
+2. Define territory criteria based on go-to-market strategy
+3. Assign accounts to territories with balance optimization
+4. Generate territory cards with: account list, total TAM, top targets, coverage gaps
+5. Model quota based on territory potential
+
+## Output
+- Territory map: \\\`./territories/plan-{period}.md\\\`
+- Account assignments: \\\`./territories/assignments-{period}.csv\\\`
+- Balance report: \\\`./territories/balance-{period}.md\\\``,
+      },
+      {
+        name: "cold-call-script",
+        description: "Write structured cold call scripts with openers, value hooks, qualifying questions, and close/next-step asks.",
+        emoji: "\uD83D\uDCF1",
+        source: "GitHub",
+        sourceUrl: "https://github.com/therealcrowder/SalesOperations",
+        instructions: `# Cold Call Script
+
+Create structured, conversational cold call scripts that book meetings.
+
+## When to Use
+- Starting outbound calling campaigns
+- Training new SDRs/BDRs
+- Testing new messaging angles
+- Calling into a new persona or vertical
+
+## Script Structure
+
+### 1. Pattern Interrupt Opener (5 seconds)
+Break through the "sales call" mental filter:
+- "Hi [Name], this is [You] from [Company]. I know you weren't expecting my call — do you have 30 seconds?"
+- "Hey [Name], I'm [You]. I noticed [specific observation about their company]. Quick question about that?"
+
+Avoid: "How are you today?" or "Is now a good time?"
+
+### 2. Reason for Calling (10 seconds)
+Connect to something specific and relevant:
+- Reference a trigger event (job posting, funding, product launch)
+- Mention a peer company using your solution
+- Share a specific insight relevant to their role
+
+### 3. Value Hook (15 seconds)
+One compelling statement about what you help with:
+- "We help [similar companies] [achieve specific outcome] without [common pain point]"
+- Include a metric if possible: "saving an average of X hours/week" or "increasing Y by Z%"
+
+### 4. Qualifying Question (open-ended)
+- "How are you currently handling [problem area]?"
+- "What's your biggest challenge with [relevant topic]?"
+- "Where does [process] rank on your priority list this quarter?"
+
+### 5. Handle Response
+- **Interested**: Book the meeting immediately. "Great — I have Tuesday at 2pm or Thursday at 10am. Which works?"
+- **Objection**: Use objection handling frameworks. Don't argue — ask questions.
+- **Not interested**: Thank them, offer to send a resource, ask for referral.
+- **Gatekeeper**: Be respectful. "Could you help me reach the right person for [specific topic]?"
+
+### 6. Close / Next Step
+Always end with a specific ask:
+- "Can I send you a calendar invite for a 20-minute demo?"
+- "Would it make sense to loop in [role] for a quick conversation?"
+
+## Guidelines
+- Keep total talk time under 2 minutes before asking for the meeting
+- Sound human, not scripted — bullets not paragraphs
+- Smile while talking (it changes your voice)
+- Stand up for energy
+- Practice the opener until it's natural
+
+## Output
+Save to \\\`./scripts/{persona}-{campaign}.md\\\``,
+      },
+      {
+        name: "roi-calculator",
+        description: "Build ROI models and value propositions with quantified business impact for prospects.",
+        emoji: "\uD83D\uDCB0",
+        source: "GitHub",
+        sourceUrl: "https://github.com/therealcrowder/SalesOperations",
+        instructions: `# ROI Calculator
+
+Build quantified ROI models to demonstrate business value to prospects.
+
+## When to Use
+- Justifying price during proposal stage
+- Executive presentations (CFO, CEO meetings)
+- When prospect says "prove the value"
+- Creating case study impact summaries
+
+## ROI Framework
+
+### Cost of Current State (Without Your Solution)
+Quantify what the prospect spends or loses today:
+
+| Cost Category | Metric | How to Calculate |
+|--------------|--------|-----------------|
+| Time wasted | Hours/week x hourly rate x 52 | Ask: how many hours per week on [task]? |
+| Revenue leakage | Deals lost x avg deal size | Ask: how many deals fall through the cracks? |
+| Employee costs | FTEs dedicated x fully-loaded salary | Ask: how many people work on this? |
+| Tool costs | Current tool licenses + integration costs | Ask: what are you paying today? |
+| Error/rework costs | Error rate x cost per error x volume | Ask: how often do mistakes happen? |
+
+### Value of Your Solution
+Quantify the improvement:
+
+| Value Driver | Conservative | Moderate | Aggressive |
+|-------------|-------------|----------|-----------|
+| Time saved | 20% | 35% | 50% |
+| Revenue recovered | 10% | 20% | 30% |
+| Headcount avoided | 0.5 FTE | 1 FTE | 2 FTE |
+| Error reduction | 30% | 50% | 80% |
+
+### ROI Calculation
+\\\`\\\`\\\`
+Annual Value = Sum of all value drivers (conservative estimate)
+Annual Cost = Your solution price (annual)
+Net Benefit = Annual Value - Annual Cost
+ROI = (Net Benefit / Annual Cost) x 100%
+Payback Period = Annual Cost / (Annual Value / 12) months
+\\\`\\\`\\\`
+
+## Workflow
+1. Gather prospect's current costs (from discovery call or estimates)
+2. Map your solution's impact to each cost category
+3. Calculate conservative, moderate, and aggressive scenarios
+4. Present the conservative case (under-promise, over-deliver)
+5. Generate a one-page ROI summary for the champion to share internally
+
+## Output
+Save to \\\`./proposals/{prospect-name}-roi.md\\\``,
+      },
+      {
+        name: "follow-up-email",
+        description: "Draft contextual follow-up emails after calls, meetings, and demos that advance the deal.",
+        emoji: "\u2709\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/knadh/listmonk",
+        instructions: `# Follow-Up Email
+
+Draft effective follow-up emails that keep deals moving forward.
+
+## When to Use
+- After discovery calls
+- After demos or presentations
+- After proposals are sent
+- When a prospect goes silent
+- After conferences or events
+
+## Follow-Up Templates by Context
+
+### Post-Discovery Call
+- Thank them for their time (1 sentence)
+- Summarize the 2-3 key challenges discussed
+- Connect each challenge to how your solution addresses it
+- Propose clear next step with specific dates
+- Keep under 150 words
+
+### Post-Demo
+- Lead with the moment they were most engaged
+- Recap features that mapped to their specific use case
+- Address any concerns raised during the demo
+- Attach relevant case study or resource
+- Include next steps with timeline
+
+### Post-Proposal
+- Confirm they received and can access the proposal
+- Highlight the 1-2 most compelling points
+- Offer to walk through it with their team
+- Set expectation for decision timeline
+- Provide direct line for questions
+
+### Re-Engagement (Prospect Gone Silent)
+- Don't guilt trip — assume they're busy
+- Provide new value (industry insight, relevant article, product update)
+- Give them an easy out: "If priorities have shifted, no worries — just let me know"
+- Keep it short (3-4 sentences max)
+
+### Conference/Event Follow-Up
+- Reference the specific conversation or session
+- Remind them of the context (where you met, what you discussed)
+- Share a relevant resource tied to the discussion
+- Suggest a specific follow-up action
+
+## Email Quality Checklist
+- [ ] Subject line is specific (not "Following up" or "Checking in")
+- [ ] Opens with value, not "I wanted to follow up"
+- [ ] Under 150 words
+- [ ] One clear CTA
+- [ ] No jargon or buzzwords
+- [ ] Sent within 24 hours of the interaction
+
+## Output
+Save to \\\`./emails/{prospect-name}-followup-{date}.md\\\``,
+      },
     ],
     heartbeat: `# HEARTBEAT.md — Sales Assistant
 
@@ -3769,6 +4507,752 @@ Create complete, deployable landing pages from a business brief.
 
 ## Output
 Save to \`./landing-pages/{project-name}/index.html\``,
+      },
+      {
+        name: "icp-builder",
+        description: "Define and refine Ideal Customer Profiles with firmographic, technographic, and behavioral criteria.",
+        emoji: "\uD83C\uDFAF",
+        source: "GitHub",
+        sourceUrl: "https://github.com/brightdata/ai-lead-generator",
+        instructions: `# ICP Builder
+
+Define, score, and refine your Ideal Customer Profile to focus lead gen efforts.
+
+## When to Use
+- Starting a new outbound campaign
+- Entering a new market or vertical
+- Win rate is dropping and targeting needs refinement
+- Quarterly ICP review based on closed-won data
+
+## ICP Framework
+
+### Firmographic Criteria
+
+| Dimension | Definition | Examples |
+|-----------|-----------|---------|
+| Industry | Target verticals | SaaS, fintech, healthcare tech |
+| Company size | Employee count range | 50-500 employees |
+| Revenue | Annual revenue band | $5M-$50M ARR |
+| Geography | Target regions | US, UK, DACH region |
+| Growth stage | Funding/maturity | Series A-C, growth stage |
+
+### Technographic Criteria
+- **Current tools**: What software do they use? (CRM, marketing, dev tools)
+- **Tech stack signals**: Specific technologies that indicate fit
+- **Missing tools**: Gaps in their stack that your product fills
+- **Integration potential**: Do their existing tools work with yours?
+
+### Behavioral Signals
+- **Hiring patterns**: Roles they're hiring for that signal need
+- **Content engagement**: Topics they engage with online
+- **Event attendance**: Conferences and communities they participate in
+- **Purchase triggers**: Events that create urgency (funding, new leadership, product launch)
+
+### Negative Criteria (Disqualifiers)
+- Too small or too large
+- Wrong industry
+- Already using a competitor with long contract
+- No budget indicators
+- Technology incompatibility
+
+## ICP Scoring Model
+
+| Criteria | Weight | 5 (Perfect) | 3 (Okay) | 1 (Poor) |
+|----------|--------|-------------|----------|----------|
+| Industry fit | 25% | Target vertical | Adjacent | Unrelated |
+| Size fit | 20% | Sweet spot | Close | Too small/big |
+| Tech fit | 20% | Uses complementary tools | Neutral stack | Incompatible |
+| Budget signals | 15% | Recent funding/growth | Stable | Contracting |
+| Timing signals | 10% | Active buying signals | Passive interest | No signals |
+| Access | 10% | Warm intro available | LinkedIn active | No path in |
+
+## Workflow
+1. Analyze closed-won deals for common traits
+2. Define firmographic, technographic, and behavioral criteria
+3. Set scoring weights based on what predicts success
+4. Test against recent wins and losses (does the model predict correctly?)
+5. Document ICP with examples of ideal accounts
+6. Create a scoring spreadsheet for the team
+
+## Output
+Save to \\\`./config/icp.md\\\` and \\\`./config/icp-scorecard.csv\\\``,
+      },
+      {
+        name: "email-validator",
+        description: "Validate email lists for deliverability — catch syntax errors, disposable domains, and risky addresses.",
+        emoji: "\u2705",
+        source: "GitHub",
+        sourceUrl: "https://github.com/reacherhq/check-if-email-exists",
+        requires: { bins: ["curl"] },
+        instructions: `# Email Validator
+
+Validate email addresses and lists for deliverability before outbound campaigns.
+
+## When to Use
+- Before launching any email campaign
+- After importing a new lead list
+- When bounce rates exceed 3%
+- Monthly hygiene on the active contact database
+
+## Validation Checks
+
+### Syntax Validation
+- Valid email format (user@domain.tld)
+- No spaces, special characters, or encoding issues
+- Domain has valid TLD
+
+### Domain Checks
+- Domain exists and resolves (DNS lookup)
+- MX records present (can receive email)
+- Not a known disposable email provider (mailinator, guerrillamail, etc.)
+- Not a known spam trap domain
+- SPF/DKIM/DMARC records present (legitimate domain)
+
+### Address Quality Scoring
+
+| Risk Level | Indicators | Action |
+|-----------|-----------|--------|
+| Safe | Valid syntax, real domain, professional email | Send |
+| Caution | Free email (gmail), generic role (info@) | Review |
+| Risky | Catch-all domain, no MX verification | Skip or verify manually |
+| Invalid | Bad syntax, dead domain, known bounce | Remove immediately |
+
+### Common Patterns to Flag
+- Role-based addresses: info@, sales@, admin@, support@
+- Catch-all domains (accept everything — can't verify individual)
+- Free email providers on B2B lists (may indicate low quality)
+- Duplicate emails in the list
+- Emails that previously bounced
+
+## Workflow
+1. Load email list from CSV
+2. Run syntax validation (instant)
+3. Run domain-level checks (DNS, MX records)
+4. Score each email by risk level
+5. Generate report with counts per risk level
+6. Output cleaned list with only Safe + Caution addresses
+
+## Output
+- Validated list: \\\`./leads/validated-{date}.csv\\\`
+- Removed list: \\\`./leads/removed-{date}.csv\\\`
+- Validation report: \\\`./leads/validation-report-{date}.md\\\``,
+      },
+      {
+        name: "outbound-campaign",
+        description: "Plan and structure multi-channel outbound campaigns with targeting, sequencing, and A/B testing.",
+        emoji: "\uD83D\uDCE8",
+        source: "GitHub",
+        sourceUrl: "https://github.com/freeCodeCamp/mail-for-good",
+        instructions: `# Outbound Campaign Builder
+
+Plan and execute structured outbound campaigns across email, LinkedIn, and phone.
+
+## When to Use
+- Launching a new outbound motion
+- Testing new messaging or personas
+- Scaling proven sequences to new segments
+- Quarterly campaign planning
+
+## Campaign Blueprint
+
+### 1. Campaign Definition
+- **Objective**: Meetings booked, replies generated, pipeline created
+- **Target segment**: ICP criteria for this campaign
+- **List size**: How many contacts
+- **Timeline**: Start date, duration, expected completion
+- **Owner**: Who's running this campaign
+
+### 2. Multi-Channel Sequence
+
+| Day | Channel | Action | Goal |
+|-----|---------|--------|------|
+| 0 | Email | Cold intro with personalized hook | Open + reply |
+| 1 | LinkedIn | Connection request with note | Accept connection |
+| 3 | Email | Value-add follow-up (case study, insight) | Reply |
+| 5 | LinkedIn | Comment on their recent post | Build familiarity |
+| 7 | Phone | Cold call with warm context | Book meeting |
+| 10 | Email | Different angle or social proof | Reply |
+| 14 | Email | Break-up / door-open email | Reply or close loop |
+
+### 3. Message Variations (A/B Testing)
+For each email touchpoint, create 2-3 variations:
+- **Subject line variants**: Test curiosity vs. direct vs. personalized
+- **Opening line variants**: Test research-based vs. pain-based vs. social proof
+- **CTA variants**: Test meeting ask vs. soft ask vs. value offer
+
+### 4. Personalization Variables
+- \\\`{first_name}\\\` — Contact first name
+- \\\`{company}\\\` — Company name
+- \\\`{trigger}\\\` — Specific trigger event (funding, hiring, product launch)
+- \\\`{mutual_connection}\\\` — Shared connection or community
+- \\\`{pain_point}\\\` — Specific pain point from research
+
+### 5. Success Metrics
+
+| Metric | Target | Formula |
+|--------|--------|---------|
+| Open rate | >50% | Unique opens / emails sent |
+| Reply rate | >5% | Replies / emails sent |
+| Positive reply rate | >2% | Interested replies / emails sent |
+| Meeting rate | >1% | Meetings booked / emails sent |
+| Pipeline generated | Varies | Total pipeline from campaign contacts |
+
+## Workflow
+1. Define campaign parameters and target segment
+2. Build the target list with ICP scoring
+3. Write message sequences with A/B variants
+4. Set up tracking (UTMs, reply tracking, meeting links)
+5. Launch in batches (50-100/day max for new domains)
+6. Monitor daily: opens, replies, bounces
+7. Optimize: pause losing variants, double down on winners
+
+## Output
+Save to \\\`./campaigns/{campaign-name}/plan.md\\\``,
+      },
+      {
+        name: "linkedin-outreach",
+        description: "Craft personalized LinkedIn connection requests, InMails, and engagement strategies for prospecting.",
+        emoji: "\uD83D\uDD17",
+        source: "GitHub",
+        sourceUrl: "https://github.com/brightdata/ai-lead-generator",
+        instructions: `# LinkedIn Outreach
+
+Create personalized LinkedIn outreach sequences and engagement strategies.
+
+## When to Use
+- Building connections with target prospects
+- Multi-channel campaigns (email + LinkedIn)
+- Warm up cold prospects before email
+- Account-based marketing plays
+
+## Connection Request Templates
+
+### Research-Based (Best for Decision Makers)
+"Hi {name}, I came across {company}'s {specific thing — blog post, product launch, job posting}. As someone working in {their space}, I'd love to connect and exchange ideas on {relevant topic}."
+
+### Mutual Connection
+"Hi {name}, I noticed we both know {mutual connection}. I work with companies like {similar company} on {value prop}. Would love to connect."
+
+### Content-Based
+"Hi {name}, your post about {topic} really resonated — especially {specific point}. I work on {related area} and would love to connect and share perspectives."
+
+### Event-Based
+"Hi {name}, saw you'll be at {event/conference}. I'm attending too — would be great to connect beforehand. I focus on {relevant topic}."
+
+## Post-Connection Nurture Sequence
+
+| Day | Action | Template |
+|-----|--------|----------|
+| 0 | Connection accepted | No immediate pitch — let it breathe |
+| 2-3 | Engage with their content | Like and leave a thoughtful comment |
+| 5-7 | Share relevant content | Send an article or resource relevant to their role |
+| 10-14 | Soft value message | "Noticed {company} is {trigger}. We helped {similar co} with that — happy to share what worked" |
+| 21+ | Meeting ask | "Would a 15-min call make sense to explore this?" |
+
+## Content Engagement Strategy
+- Like and comment on prospect posts before reaching out
+- Share industry content that positions you as knowledgeable
+- Tag prospects in relevant discussions (sparingly)
+- Post your own content that addresses their pain points
+
+## Guidelines
+- **Never pitch in the connection request** — earn the right to sell
+- Keep messages under 300 characters for connection requests
+- Personalize every message — no mass generic outreach
+- Engage with their content before messaging
+- Respect "not interested" — don't be pushy
+
+## Output
+Save to \\\`./outreach/linkedin/{prospect-name}.md\\\``,
+      },
+      {
+        name: "lead-scoring",
+        description: "Build lead scoring models that combine fit, intent, and engagement signals to prioritize follow-up.",
+        emoji: "\uD83C\uDFB0",
+        source: "GitHub",
+        sourceUrl: "https://github.com/brightdata/ai-lead-generator",
+        instructions: `# Lead Scoring
+
+Build and maintain lead scoring models to prioritize outreach and follow-up.
+
+## When to Use
+- Ranking a large list of leads for outreach priority
+- Deciding which leads to pass to sales vs. nurture
+- Optimizing SDR time allocation
+- Evaluating campaign quality by lead score distribution
+
+## Scoring Model
+
+### Fit Score (0-50 points)
+Based on how well the lead matches your ICP:
+
+| Criteria | Points | Logic |
+|----------|--------|-------|
+| Industry match | 0-10 | Target industry = 10, adjacent = 5, other = 0 |
+| Company size | 0-10 | Sweet spot = 10, close = 5, far = 0 |
+| Role/title | 0-10 | Decision maker = 10, influencer = 7, user = 3 |
+| Geography | 0-5 | Target region = 5, secondary = 3, other = 0 |
+| Tech stack | 0-5 | Complementary tech = 5, neutral = 2, incompatible = 0 |
+| Revenue/funding | 0-10 | Strong budget signals = 10, moderate = 5, none = 0 |
+
+### Intent Score (0-30 points)
+Based on buying signals:
+
+| Signal | Points |
+|--------|--------|
+| Visited pricing page | +10 |
+| Downloaded content/resource | +5 |
+| Attended webinar | +5 |
+| Requested demo | +15 |
+| Opened 3+ emails | +5 |
+| Clicked email CTA | +8 |
+| Job posting matching your solution | +10 |
+| Recent funding round | +8 |
+
+### Engagement Score (0-20 points)
+Based on responsiveness:
+
+| Activity | Points |
+|----------|--------|
+| Replied to email (positive) | +15 |
+| Replied to email (neutral) | +8 |
+| Accepted LinkedIn connection | +5 |
+| Engaged with social content | +3 |
+| Referred to colleague | +10 |
+| No response to 3+ touches | -5 |
+
+### Score Interpretation
+
+| Total Score | Grade | Action |
+|------------|-------|--------|
+| 80-100 | A (Hot) | Immediate outreach, sales handoff |
+| 60-79 | B (Warm) | Priority follow-up sequence |
+| 40-59 | C (Cool) | Nurture campaign |
+| 20-39 | D (Cold) | Low-priority, passive nurture |
+| 0-19 | F (Unqualified) | Archive or disqualify |
+
+## Workflow
+1. Define scoring criteria based on ICP and historical conversion data
+2. Assign point values to each criterion
+3. Score all leads in the database
+4. Segment by grade for appropriate action
+5. Review and recalibrate monthly based on conversion rates per grade
+
+## Output
+- Scoring model: \\\`./config/lead-scoring-model.md\\\`
+- Scored leads: \\\`./leads/scored-{date}.csv\\\``,
+      },
+      {
+        name: "data-enrichment",
+        description: "Enrich lead records with company data, tech stack, funding info, and contact details from public sources.",
+        emoji: "\uD83D\uDCE5",
+        source: "GitHub",
+        sourceUrl: "https://github.com/brightdata/ai-lead-generator",
+        requires: { bins: ["curl"] },
+        instructions: `# Data Enrichment
+
+Enrich lead and company records with additional context from public sources.
+
+## When to Use
+- After importing a raw lead list
+- Before launching outbound campaigns
+- When lead records have missing fields
+- Building account intelligence for target accounts
+
+## Enrichment Fields
+
+### Company Enrichment
+
+| Field | Source | Method |
+|-------|--------|--------|
+| Industry | Company website, LinkedIn | Web search |
+| Employee count | LinkedIn, Crunchbase | Web search |
+| Revenue estimate | Crunchbase, press releases | Web search |
+| Funding stage/amount | Crunchbase, TechCrunch | Web search |
+| Tech stack | Job postings, BuiltWith | Web search + job board scraping |
+| Recent news | Google News, press releases | Web search |
+| Hiring activity | LinkedIn jobs, careers page | Web search |
+| Social profiles | Company website | Web search |
+| Key leadership | LinkedIn, about page | Web search |
+
+### Contact Enrichment
+
+| Field | Source | Method |
+|-------|--------|--------|
+| Full name | LinkedIn, company website | Web search |
+| Title/role | LinkedIn | Web search |
+| Email (work) | Company email pattern + name | Pattern inference |
+| Phone | Company website, LinkedIn | Web search |
+| LinkedIn URL | LinkedIn search | Web search |
+| Tenure | LinkedIn profile | Web search |
+| Previous company | LinkedIn profile | Web search |
+
+## Enrichment Quality Rules
+- Always cite the source of each enriched field
+- Mark confidence level: High (verified), Medium (inferred), Low (estimated)
+- Flag stale data (sources older than 6 months)
+- Never fabricate data — mark as "Unknown" if not found
+- Respect rate limits on all sources (2+ seconds between requests)
+
+## Workflow
+1. Load lead list with existing fields
+2. Identify missing fields per record
+3. Prioritize enrichment by lead score (high-score leads first)
+4. Search public sources for each missing field
+5. Append enriched data with source and confidence
+6. Generate enrichment report (coverage % per field)
+
+## Output
+- Enriched list: \\\`./leads/enriched-{date}.csv\\\`
+- Enrichment report: \\\`./leads/enrichment-report-{date}.md\\\``,
+      },
+      {
+        name: "lead-magnet-creator",
+        description: "Create downloadable lead magnets — checklists, templates, guides, and calculators — to capture emails.",
+        emoji: "\uD83E\uDDF2",
+        source: "GitHub",
+        sourceUrl: "https://github.com/LLazyEmail/awesome-email-marketing",
+        instructions: `# Lead Magnet Creator
+
+Create high-converting lead magnets that capture email addresses and qualify prospects.
+
+## When to Use
+- Need top-of-funnel content for email capture
+- Running paid ads and need landing page offers
+- Building a content-driven inbound engine
+- Creating resources for specific ICP segments
+
+## Lead Magnet Types (By Conversion Rate)
+
+### Tier 1 — Highest Converting
+- **Templates & Swipe Files**: Ready-to-use documents they can plug in immediately
+- **Calculators & Tools**: Interactive ROI calculator, grading tool, audit scorecard
+- **Checklists**: Step-by-step action lists for specific tasks
+
+### Tier 2 — High Converting
+- **Guides & Playbooks**: 5-15 page focused guide on solving a specific problem
+- **Case Studies**: Before/after stories with metrics
+- **Industry Reports**: Data-driven insights for their market
+
+### Tier 3 — Moderate Converting
+- **Webinar Recordings**: Educational content with expert insights
+- **Email Courses**: 5-7 day drip sequence teaching a skill
+- **Resource Lists**: Curated list of tools, vendors, or resources
+
+## Lead Magnet Framework
+
+### 1. Choose the Right Format
+- Match to the prospect's stage (awareness, consideration, decision)
+- Higher effort = higher quality leads (report > checklist)
+- Solve ONE specific problem completely
+
+### 2. Create the Content
+- **Title formula**: [Number] + [Adjective] + [Noun] + for [Audience] + to [Outcome]
+  - Example: "7 Proven Templates for B2B Marketers to Double Reply Rates"
+- Keep it actionable — they should be able to use it immediately
+- Include your branding but don't make it a sales pitch
+- Design for scannability (headers, bullets, tables)
+
+### 3. Landing Page Elements
+- Headline matching the ad or promotion
+- 3-5 bullet points on what they'll learn/get
+- Social proof (download count, testimonials)
+- Simple form (name + email minimum)
+- Preview image of the lead magnet
+
+## Workflow
+1. Identify target persona and their top pain point
+2. Choose lead magnet format based on persona stage
+3. Create the content (template, guide, checklist, etc.)
+4. Write landing page copy
+5. Build the HTML landing page (using landing-page-builder skill)
+6. Set up email delivery sequence
+
+## Output
+Save to \\\`./lead-magnets/{magnet-name}/\\\` with content file + landing page`,
+      },
+      {
+        name: "account-mapping",
+        description: "Map target accounts with stakeholder hierarchies, buying committees, and engagement strategies.",
+        emoji: "\uD83D\uDDFA\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/twentyhq/twenty",
+        instructions: `# Account Mapping
+
+Map target accounts with stakeholder roles, buying committees, and engagement plans.
+
+## When to Use
+- Planning account-based marketing (ABM) campaigns
+- Entering a strategic account with multiple stakeholders
+- When deals are multi-threaded and complex
+- Quarterly account planning reviews
+
+## Account Map Template
+
+### Company Profile
+- Company name, industry, size, HQ
+- Annual revenue, growth trajectory
+- Key products/services
+- Recent news and strategic initiatives
+
+### Buying Committee Map
+
+| Role | Name | Title | Influence | Relationship | Status |
+|------|------|-------|-----------|-------------|--------|
+| Economic Buyer | | | Decision (budget) | Cold/Warm/Hot | Not contacted |
+| Champion | | | High (internal advocate) | | |
+| Technical Evaluator | | | Medium (vets solution) | | |
+| User Buyer | | | Medium (daily user) | | |
+| Blocker | | | Negative (resists change) | | |
+| Coach | | | Varies (gives intel) | | |
+
+### Engagement Strategy Per Stakeholder
+For each person in the buying committee:
+- **Current relationship**: How did we connect? Last interaction?
+- **Pain points**: What keeps them up at night?
+- **Value proposition**: How does our solution help THEM specifically?
+- **Content to share**: What resource matches their concerns?
+- **Outreach channel**: Email, LinkedIn, phone, event, mutual intro?
+- **Next action**: Specific next step with date
+
+### Account Penetration Score
+
+| Dimension | Score (1-5) | Notes |
+|-----------|------------|-------|
+| # of contacts identified | | 5 = 5+ contacts across departments |
+| Economic buyer access | | 5 = direct relationship |
+| Champion strength | | 5 = actively selling internally |
+| Technical validation | | 5 = POC completed successfully |
+| Timeline clarity | | 5 = defined purchase timeline |
+
+## Workflow
+1. Research the account (firmographics, news, tech stack)
+2. Identify all stakeholders in the buying process
+3. Map roles, influence levels, and current relationships
+4. Develop per-stakeholder engagement strategy
+5. Score account penetration
+6. Define next actions for each stakeholder
+
+## Output
+Save to \\\`./accounts/{company-name}/map.md\\\``,
+      },
+      {
+        name: "intent-signal-monitor",
+        description: "Track buying intent signals from job postings, funding events, tech changes, and content engagement.",
+        emoji: "\uD83D\uDCE1",
+        source: "GitHub",
+        sourceUrl: "https://github.com/brightdata/ai-lead-generator",
+        requires: { bins: ["curl"] },
+        instructions: `# Intent Signal Monitor
+
+Track and act on buying intent signals from public sources.
+
+## When to Use
+- Monitoring target accounts for buying triggers
+- Prioritizing outreach based on real-time signals
+- Building trigger-based outbound campaigns
+- Weekly pipeline review prep
+
+## Signal Categories
+
+### High Intent (Act Within 48 Hours)
+
+| Signal | Source | Why It Matters |
+|--------|--------|---------------|
+| Job posting matching your solution | LinkedIn Jobs, careers page | They're investing in the problem you solve |
+| Funding announcement | Crunchbase, TechCrunch | Budget unlocked, pressure to grow |
+| New C-level hire (in your space) | LinkedIn, press releases | New leader = new priorities |
+| Competitor contract ending | Industry intel, direct ask | Evaluation window opening |
+| Demo request or pricing page visit | Your analytics | Active buying process |
+
+### Medium Intent (Act Within 1 Week)
+
+| Signal | Source | Why It Matters |
+|--------|--------|---------------|
+| Hiring surge in relevant department | LinkedIn | Scaling pain = need for tools |
+| Product launch or expansion | Press, Product Hunt | GTM motion needs support |
+| Conference attendance (your space) | Event sites, LinkedIn | Actively learning about solutions |
+| Content engagement (your content) | Marketing analytics | Awareness and interest growing |
+| Technology change (added/removed tool) | BuiltWith, job posts | Stack evaluation in progress |
+
+### Low Intent (Nurture)
+
+| Signal | Source | Why It Matters |
+|--------|--------|---------------|
+| Industry report download | Your gated content | General interest in the space |
+| Social media engagement | LinkedIn, Twitter | Brand awareness |
+| Webinar attendance | Your events | Educational stage |
+| Blog visits (multiple) | Website analytics | Research phase |
+
+## Monitoring Workflow
+1. Define target accounts and signals to track
+2. Set up monitoring schedule (daily for high-priority accounts)
+3. Search public sources for each signal type
+4. Score and timestamp each signal detected
+5. Generate alert digest with recommended actions
+6. Update lead scores based on new signals
+
+## Alert Format
+For each signal detected:
+- **Account**: Company name
+- **Signal**: What was detected
+- **Source**: Where found + link
+- **Date**: When the signal occurred
+- **Score impact**: How many points to add
+- **Recommended action**: Specific outreach step
+
+## Output
+Save to \\\`./signals/alerts-{date}.md\\\` and update \\\`./signals/signal-log.csv\\\``,
+      },
+      {
+        name: "campaign-analytics",
+        description: "Analyze outbound campaign performance with funnel metrics, A/B test results, and optimization recommendations.",
+        emoji: "\uD83D\uDCC9",
+        source: "GitHub",
+        sourceUrl: "https://github.com/growthbook/growthbook",
+        instructions: `# Campaign Analytics
+
+Analyze outbound campaign performance and generate optimization recommendations.
+
+## When to Use
+- Weekly campaign performance reviews
+- Comparing A/B test variants
+- Diagnosing drops in reply rates or conversions
+- Reporting campaign ROI to leadership
+
+## Key Metrics Dashboard
+
+### Email Metrics
+
+| Metric | Good | Average | Poor |
+|--------|------|---------|------|
+| Delivery rate | >97% | 93-97% | <93% |
+| Open rate | >50% | 30-50% | <30% |
+| Reply rate | >5% | 2-5% | <2% |
+| Positive reply rate | >2% | 1-2% | <1% |
+| Bounce rate | <2% | 2-5% | >5% |
+| Unsubscribe rate | <0.5% | 0.5-1% | >1% |
+
+### LinkedIn Metrics
+
+| Metric | Good | Average | Poor |
+|--------|------|---------|------|
+| Connection accept rate | >40% | 20-40% | <20% |
+| Message reply rate | >15% | 8-15% | <8% |
+| InMail response rate | >10% | 5-10% | <5% |
+
+### Funnel Metrics
+
+| Stage | Metric |
+|-------|--------|
+| Contacted | Total leads in campaign |
+| Engaged | Opened/clicked/connected |
+| Replied | Any response received |
+| Interested | Positive response |
+| Meeting | Call/demo scheduled |
+| Opportunity | Pipeline created |
+
+## Diagnosis Framework
+
+### Low Open Rates
+- Subject lines not compelling (test new angles)
+- Sending at wrong times (test time of day)
+- Deliverability issues (check SPF/DKIM, domain reputation)
+- List quality issues (wrong contacts)
+
+### Low Reply Rates (But Good Opens)
+- Message not resonating (test new value props)
+- No personalization (add prospect-specific hooks)
+- Weak CTA (test different asks)
+- Wrong persona (check ICP alignment)
+
+### Low Meeting Conversion (But Good Replies)
+- Follow-up too slow (respond within 1 hour)
+- Scheduling friction (use calendar links)
+- Value not clear enough in follow-up
+- Qualification mismatch (interested but not ICP)
+
+## Workflow
+1. Pull campaign data (sent, delivered, opened, replied, meetings, pipeline)
+2. Calculate all metrics by sequence step and variant
+3. Identify top and bottom performing variants
+4. Diagnose underperforming stages
+5. Generate optimization recommendations
+6. Compare to previous period and benchmarks
+
+## Output
+Save to \\\`./campaigns/{campaign-name}/analytics-{date}.md\\\``,
+      },
+      {
+        name: "cold-email-writer",
+        description: "Write personalized cold emails that get replies — subject lines, opening hooks, value props, and CTAs.",
+        emoji: "\u2709\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/LLazyEmail/awesome-email-marketing",
+        instructions: `# Cold Email Writer
+
+Write cold emails that stand out in crowded inboxes and generate replies.
+
+## When to Use
+- Writing initial outreach emails for campaigns
+- A/B testing new email angles
+- Personalizing emails at scale with research data
+- Training SDRs on effective cold email
+
+## Cold Email Framework
+
+### Subject Line Rules
+- Under 40 characters (mobile preview)
+- Specific, not generic ("Quick Q about {company}'s pipeline" not "Intro")
+- Curiosity-driven or value-driven
+- No spam triggers (FREE, URGENT, Act Now)
+- Lowercase can outperform Title Case
+
+### Email Structure (Under 150 Words)
+
+**Opening line** (personalized, proves you did research):
+- Reference a specific trigger (job posting, funding, product launch)
+- Mention mutual connection or shared experience
+- Comment on their content (LinkedIn post, podcast, article)
+
+**Value bridge** (1-2 sentences):
+- Connect their situation to a relevant outcome
+- Use social proof (similar company achieved X)
+- Quantify the value (saved Y hours, increased Z%)
+
+**CTA** (one clear, low-friction ask):
+- Soft: "Worth a 15-min chat?"
+- Specific: "Free Tuesday at 2pm for a quick call?"
+- Value-first: "Can I send you our [relevant resource]?"
+
+### Personalization Variables
+
+| Variable | Source | Example |
+|----------|--------|---------|
+| Company trigger | News, job postings | "Saw you're hiring 3 SDRs" |
+| Personal context | LinkedIn, content | "Your post on X resonated" |
+| Tech stack | BuiltWith, job posts | "Noticed you're using Outreach" |
+| Mutual connection | LinkedIn | "Sarah at Acme suggested I reach out" |
+| Industry insight | Research | "B2B SaaS teams averaging 23% reply rates" |
+
+### A/B Test Variables
+- Subject line (curiosity vs. direct vs. personalized)
+- Opening line (trigger-based vs. compliment vs. question)
+- CTA (soft ask vs. specific time vs. value offer)
+- Email length (3 sentences vs. 5 sentences)
+- Sender name (first name vs. full name)
+
+## Quality Checklist
+- [ ] Under 150 words
+- [ ] Personalized opening (not interchangeable with another prospect)
+- [ ] One clear CTA
+- [ ] No attachments (triggers spam filters)
+- [ ] No links in first email (optional — test this)
+- [ ] Reads naturally out loud
+- [ ] Subject line under 40 chars
+
+## Output
+Save to \\\`./emails/{campaign}/{prospect-name}.md\\\``,
       },
     ],
     heartbeat: `# HEARTBEAT.md — Lead Gen Machine
@@ -3896,6 +5380,866 @@ For each failure, report:
 - **Root cause**: what went wrong
 - **Suggested fix**: specific action to take
 - **Priority**: P1 (blocks deploy) / P2 (degrades CI) / P3 (flaky, non-blocking)`,
+      },
+      {
+        name: "code-reviewer",
+        description: "Perform deep code reviews with security, performance, and maintainability analysis across any codebase.",
+        emoji: "\uD83D\uDD0D",
+        source: "GitHub",
+        sourceUrl: "https://github.com/reviewdog/reviewdog",
+        instructions: `# Code Reviewer
+
+Perform thorough code reviews focused on correctness, security, performance, and maintainability.
+
+## When to Use
+- Reviewing code before committing or merging
+- Auditing an unfamiliar codebase
+- Post-incident review of problematic code
+- Onboarding to a new project
+
+## Review Checklist
+
+### 1. Correctness
+- Does the code do what it claims to do?
+- Are edge cases handled (null, empty, negative, overflow)?
+- Are error paths handled and errors propagated correctly?
+- Are race conditions possible in concurrent code?
+- Do loops terminate? Are off-by-one errors present?
+
+### 2. Security
+- Input validation: is all user input sanitized?
+- SQL injection: parameterized queries or ORM used?
+- XSS: output escaped in HTML contexts?
+- Authentication: are auth checks present on all protected routes?
+- Secrets: no hardcoded API keys, passwords, or tokens?
+- Dependencies: any known vulnerabilities in imported packages?
+
+### 3. Performance
+- N+1 queries: are database queries inside loops?
+- Missing indexes: will queries scan full tables?
+- Memory leaks: are listeners, timers, or connections cleaned up?
+- Unnecessary computation: can anything be cached or memoized?
+- Large payload: is response data trimmed to what's needed?
+
+### 4. Maintainability
+- Naming: do variable/function names clearly describe their purpose?
+- Complexity: is any function longer than 50 lines? Can it be split?
+- DRY: is there duplicated logic that should be extracted?
+- Comments: are complex algorithms or business rules explained?
+- Tests: are tests present for the new/changed code?
+
+### 5. Style & Conventions
+- Follows the project's existing patterns
+- Consistent formatting (the linter should catch most of this)
+- Imports organized and unused imports removed
+- No dead code or commented-out blocks
+
+## Review Output Format
+For each issue found:
+- **File:line** — location in code
+- **Severity** — Critical / Warning / Suggestion
+- **Category** — Security / Performance / Correctness / Style
+- **Issue** — What's wrong
+- **Suggestion** — How to fix it with a code example
+
+## Summary
+End with:
+- Overall assessment: Approve / Request Changes / Needs Discussion
+- Risk level: Low / Medium / High
+- Key concerns (top 3)`,
+      },
+      {
+        name: "test-writer",
+        description: "Generate comprehensive test suites — unit tests, integration tests, and edge case coverage for any codebase.",
+        emoji: "\uD83E\uDDEA",
+        source: "GitHub",
+        sourceUrl: "https://github.com/vitest-dev/vitest",
+        instructions: `# Test Writer
+
+Generate comprehensive test suites for code with proper coverage of happy paths, edge cases, and error conditions.
+
+## When to Use
+- Writing tests for new features
+- Adding coverage to untested existing code
+- Creating regression tests after bug fixes
+- Setting up test infrastructure for a new project
+
+## Test Strategy
+
+### Unit Tests
+- Test individual functions/methods in isolation
+- Mock external dependencies (database, API, file system)
+- Fast execution, no side effects
+- Cover: happy path, edge cases, error cases, boundary values
+
+### Integration Tests
+- Test components working together
+- Use real (or realistic) dependencies where practical
+- Test data flow across module boundaries
+- Cover: API endpoints, database operations, service interactions
+
+### Edge Cases to Always Test
+
+| Category | Examples |
+|----------|---------|
+| Empty/null | Empty string, null, undefined, empty array, empty object |
+| Boundaries | 0, 1, -1, MAX_INT, MIN_INT, empty collection |
+| Invalid input | Wrong type, malformed data, missing required fields |
+| Concurrency | Simultaneous calls, race conditions, timeouts |
+| State | Uninitialized, partially initialized, already completed |
+
+## Test Structure (Arrange-Act-Assert)
+
+\\\`\\\`\\\`
+describe('FunctionName', () => {
+  it('should [expected behavior] when [condition]', () => {
+    // Arrange — set up test data and dependencies
+    // Act — call the function under test
+    // Assert — verify the expected outcome
+  });
+});
+\\\`\\\`\\\`
+
+## Naming Convention
+- \\\`should [do something] when [condition]\\\`
+- Be specific: "should return empty array when no users match filter"
+- Not vague: "should work correctly"
+
+## Coverage Targets
+- Aim for 80%+ line coverage on business logic
+- 100% coverage on critical paths (auth, payments, data mutations)
+- Don't chase 100% overall — test behavior, not implementation
+
+## Workflow
+1. Read the code to understand what it does
+2. Identify the public API (inputs, outputs, side effects)
+3. List test cases: happy path, edge cases, error cases
+4. Write tests in order of importance (critical paths first)
+5. Run tests and verify they pass
+6. Check coverage and add missing scenarios
+
+## Output
+Save tests alongside source files following project conventions (e.g., \\\`*.test.ts\\\`, \\\`*.spec.js\\\`, \\\`test_*.py\\\`)`,
+      },
+      {
+        name: "api-designer",
+        description: "Design RESTful and GraphQL APIs with proper endpoints, schemas, authentication, and documentation.",
+        emoji: "\uD83D\uDD0C",
+        source: "GitHub",
+        sourceUrl: "https://github.com/OpenAPITools/openapi-generator",
+        instructions: `# API Designer
+
+Design clean, consistent, and well-documented APIs.
+
+## When to Use
+- Building a new API or adding endpoints
+- Reviewing API design for consistency
+- Generating API documentation
+- Planning API versioning strategy
+
+## REST API Design Principles
+
+### URL Structure
+- Use nouns, not verbs: \\\`/users\\\` not \\\`/getUsers\\\`
+- Plural resources: \\\`/users\\\` not \\\`/user\\\`
+- Nested resources for relationships: \\\`/users/{id}/posts\\\`
+- Use query params for filtering: \\\`/users?role=admin&active=true\\\`
+- Keep URLs 3 levels deep max
+
+### HTTP Methods
+
+| Method | Purpose | Idempotent | Example |
+|--------|---------|-----------|---------|
+| GET | Read | Yes | GET /users/{id} |
+| POST | Create | No | POST /users |
+| PUT | Full replace | Yes | PUT /users/{id} |
+| PATCH | Partial update | Yes | PATCH /users/{id} |
+| DELETE | Remove | Yes | DELETE /users/{id} |
+
+### Response Codes
+
+| Code | Meaning | When to Use |
+|------|---------|------------|
+| 200 | OK | Successful GET, PUT, PATCH |
+| 201 | Created | Successful POST |
+| 204 | No Content | Successful DELETE |
+| 400 | Bad Request | Validation error |
+| 401 | Unauthorized | Missing/invalid auth |
+| 403 | Forbidden | Authenticated but not allowed |
+| 404 | Not Found | Resource doesn't exist |
+| 409 | Conflict | Duplicate or state conflict |
+| 429 | Too Many Requests | Rate limit hit |
+| 500 | Server Error | Unhandled exception |
+
+### Response Format
+\\\`\\\`\\\`json
+{
+  "data": { ... },
+  "meta": { "page": 1, "total": 100 },
+  "errors": []
+}
+\\\`\\\`\\\`
+
+### Pagination
+- Use cursor-based for large/real-time datasets
+- Use offset/limit for small, static datasets
+- Always return total count and next page indicator
+
+### Authentication
+- Bearer tokens for API-to-API
+- OAuth2 for third-party access
+- API keys for server-to-server (with rate limits)
+- Always over HTTPS
+
+## Workflow
+1. Identify the resources and their relationships
+2. Design endpoints following REST conventions
+3. Define request/response schemas with types
+4. Specify authentication and authorization rules
+5. Document with OpenAPI/Swagger format
+6. Include example requests and responses
+
+## Output
+Save API spec to \\\`./docs/api/{name}-spec.md\\\` or \\\`./docs/api/openapi.yaml\\\``,
+      },
+      {
+        name: "debug-detective",
+        description: "Systematically diagnose bugs with structured reproduction, root cause analysis, and fix verification.",
+        emoji: "\uD83D\uDD75\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/SonarSource/sonarqube",
+        instructions: `# Debug Detective
+
+Systematically diagnose and fix bugs with structured debugging methodology.
+
+## When to Use
+- Investigating bug reports
+- Diagnosing production incidents
+- Tracking down intermittent/flaky issues
+- Post-mortem root cause analysis
+
+## Debugging Framework
+
+### 1. Reproduce
+- Get exact steps to reproduce
+- Note environment: OS, browser, versions, config
+- Can you reproduce consistently? If intermittent, note frequency
+- Simplify: find the minimal reproduction case
+
+### 2. Isolate
+- Binary search: narrow down where the bug lives
+- Comment out code, add logging, check boundaries
+- Is it frontend or backend? Which layer? Which function?
+- When did it start? Check git blame/log for recent changes
+
+### 3. Hypothesize
+- Based on symptoms, list 3 most likely causes
+- Rank by probability
+- Design a test for each hypothesis (what would confirm/deny it?)
+
+### 4. Verify
+- Test your top hypothesis first
+- Add targeted logging or breakpoints
+- Check: does the fix resolve the issue without breaking other things?
+- Write a regression test that fails before the fix and passes after
+
+### 5. Document
+- Root cause: what actually went wrong
+- Fix: what was changed and why
+- Impact: what was affected, for how long
+- Prevention: what would have caught this earlier
+
+## Common Bug Patterns
+
+| Pattern | Symptoms | Likely Cause |
+|---------|----------|-------------|
+| Works locally, fails in prod | Environment-specific behavior | Env vars, config, permissions, deps |
+| Intermittent failure | Random timing, sometimes works | Race condition, timing, flaky dependency |
+| Works for some users | User-specific behavior | Permissions, data state, browser/device |
+| Worked yesterday | Recent breakage | Check recent commits, deploys, config changes |
+| Memory growing | Slow degradation | Memory leak (listeners, closures, caches) |
+| Timeout errors | Slow or hanging requests | N+1 queries, missing indexes, deadlock |
+
+## Debugging Tools by Context
+- **Frontend**: Browser DevTools (console, network, elements, performance)
+- **Backend**: Logging, debugger, profiler, request tracing
+- **Database**: Query explain plans, slow query logs, connection pool stats
+- **Infrastructure**: System logs, metrics dashboards, health checks
+
+## Output
+Save bug report to \\\`./bugs/{bug-id}-analysis.md\\\``,
+      },
+      {
+        name: "doc-generator",
+        description: "Generate documentation — README files, API docs, architecture diagrams, and inline code documentation.",
+        emoji: "\uD83D\uDCD6",
+        source: "GitHub",
+        sourceUrl: "https://github.com/facebook/docusaurus",
+        instructions: `# Documentation Generator
+
+Generate clear, comprehensive documentation for codebases and APIs.
+
+## When to Use
+- Setting up a new project (README, contributing guide)
+- Documenting APIs for consumers
+- Creating architecture decision records
+- Writing onboarding docs for new team members
+
+## Documentation Types
+
+### README.md
+Essential sections:
+1. **Project name and description** (1-2 sentences)
+2. **Quick start** (get running in < 5 minutes)
+3. **Prerequisites** (language, tools, system requirements)
+4. **Installation** (step by step, copy-pasteable)
+5. **Usage** (common use cases with examples)
+6. **Configuration** (env vars, config files)
+7. **Development** (how to contribute, run tests)
+8. **Architecture** (high-level overview for context)
+9. **Deployment** (how to ship it)
+10. **License**
+
+### API Documentation
+For each endpoint:
+- Method + URL
+- Description (what it does, when to use it)
+- Authentication required
+- Request parameters (path, query, body) with types
+- Response schema with examples
+- Error responses
+- Rate limits
+
+### Architecture Decision Records (ADR)
+Template:
+- **Title**: ADR-{number}: {Short decision title}
+- **Status**: Proposed / Accepted / Deprecated / Superseded
+- **Context**: What is the issue we're deciding?
+- **Decision**: What did we decide and why?
+- **Alternatives considered**: What else did we evaluate?
+- **Consequences**: What are the implications?
+
+### Code Comments
+- **When to comment**: Complex algorithms, business rules, workarounds, non-obvious decisions
+- **When NOT to comment**: Obvious code, restating what the code does
+- **Style**: Explain WHY, not WHAT
+
+## Workflow
+1. Read the codebase structure and understand the architecture
+2. Identify what documentation is missing or outdated
+3. Generate documentation following the appropriate template
+4. Include working code examples (test them!)
+5. Cross-reference related docs
+
+## Output
+Save documentation to \\\`./docs/\\\` or alongside source files as appropriate`,
+      },
+      {
+        name: "dependency-auditor",
+        description: "Audit project dependencies for security vulnerabilities, outdated packages, and license compliance.",
+        emoji: "\uD83D\uDD12",
+        source: "GitHub",
+        sourceUrl: "https://github.com/aquasecurity/trivy",
+        instructions: `# Dependency Auditor
+
+Audit project dependencies for security, freshness, and license compliance.
+
+## When to Use
+- Before releases or deployments
+- Monthly security hygiene checks
+- When npm/pip/go audit reports vulnerabilities
+- Evaluating whether to adopt a new dependency
+
+## Audit Checklist
+
+### Security
+- Run package manager audit (\\\`npm audit\\\`, \\\`pip-audit\\\`, \\\`go vuln check\\\`)
+- Check for known CVEs in direct and transitive dependencies
+- Flag severity: Critical > High > Medium > Low
+- For each vulnerability: can we upgrade? Is there a patch? Is it exploitable in our context?
+
+### Freshness
+
+| Status | Definition | Action |
+|--------|-----------|--------|
+| Current | Latest version | No action needed |
+| Minor behind | Patch/minor updates available | Update in next sprint |
+| Major behind | Major version behind | Plan migration |
+| Deprecated | No longer maintained | Find replacement |
+| End-of-life | Security patches stopped | Urgent replacement |
+
+### License Compliance
+
+| License | Commercial Use | Risk |
+|---------|---------------|------|
+| MIT | Yes | Low — very permissive |
+| Apache 2.0 | Yes | Low — patent grant included |
+| BSD | Yes | Low — permissive |
+| ISC | Yes | Low — simplified MIT |
+| GPL v2/v3 | Careful | High — copyleft, may require open-sourcing |
+| AGPL | Careful | Very High — network copyleft |
+| SSPL | Careful | High — server-side copyleft |
+| Unlicensed | No | Very High — no permission granted |
+
+### Dependency Health Evaluation
+When evaluating a new dependency, check:
+- **Maintenance**: Last commit date, release frequency, open issues/PRs
+- **Popularity**: Downloads, GitHub stars, community size
+- **Size**: Bundle size impact (for frontend), install size
+- **Alternatives**: Are there lighter or better-maintained options?
+- **Transitive deps**: How many sub-dependencies does it bring?
+
+## Workflow
+1. Identify package manager and lock files
+2. Run security audit commands
+3. Check for outdated packages
+4. Scan licenses
+5. Generate report with prioritized action items
+
+## Output
+Save to \\\`./docs/dependency-audit-{date}.md\\\``,
+      },
+      {
+        name: "perf-profiler",
+        description: "Profile application performance — identify slow queries, memory leaks, bottlenecks, and optimization opportunities.",
+        emoji: "\u26A1",
+        source: "GitHub",
+        sourceUrl: "https://github.com/grafana/pyroscope",
+        instructions: `# Performance Profiler
+
+Identify and fix performance bottlenecks in applications.
+
+## When to Use
+- Application feels slow or unresponsive
+- Memory usage growing over time
+- Database queries taking too long
+- API response times exceeding SLAs
+- Before and after optimization verification
+
+## Performance Analysis Areas
+
+### Backend/API Performance
+- **Response time**: Measure P50, P95, P99 latencies
+- **Database queries**: Look for N+1 queries, missing indexes, full table scans
+- **Memory usage**: Track heap size over time, look for leaks
+- **CPU usage**: Find hot functions with profiling
+- **I/O bottlenecks**: File operations, network calls, external APIs
+
+### Frontend Performance
+- **First Contentful Paint (FCP)**: Target < 1.8s
+- **Largest Contentful Paint (LCP)**: Target < 2.5s
+- **Cumulative Layout Shift (CLS)**: Target < 0.1
+- **Time to Interactive (TTI)**: Target < 3.8s
+- **Bundle size**: Identify large dependencies, code splitting opportunities
+
+### Database Performance
+- **Slow query log**: Queries taking > 100ms
+- **Missing indexes**: Queries doing sequential scans
+- **Connection pool**: Are connections exhausted?
+- **Query plans**: Use EXPLAIN ANALYZE to understand execution
+
+## Common Optimizations
+
+| Problem | Solution |
+|---------|----------|
+| N+1 queries | Eager loading, batch queries, DataLoader |
+| Missing indexes | Add indexes on frequently queried columns |
+| Large payloads | Pagination, field selection, compression |
+| Redundant computation | Caching (Redis, in-memory, CDN) |
+| Synchronous blocking | Async/await, background jobs, queues |
+| Memory leaks | Clean up listeners, close connections, bound caches |
+| Large bundles | Code splitting, tree shaking, lazy loading |
+
+## Profiling Workflow
+1. Define the performance target (what "fast enough" means)
+2. Measure current baseline (don't optimize without data)
+3. Identify the bottleneck (profile, don't guess)
+4. Apply targeted fix (one change at a time)
+5. Measure again (verify the improvement)
+6. Document the optimization and its impact
+
+## Output
+Save report to \\\`./docs/perf-report-{date}.md\\\` with before/after measurements`,
+      },
+      {
+        name: "docker-helper",
+        description: "Create Dockerfiles, docker-compose configs, and container debugging for development and production.",
+        emoji: "\uD83D\uDC33",
+        source: "GitHub",
+        sourceUrl: "https://github.com/hadolint/hadolint",
+        instructions: `# Docker Helper
+
+Create and manage Docker configurations for development and production environments.
+
+## When to Use
+- Containerizing an application
+- Setting up local development with Docker Compose
+- Debugging container issues
+- Optimizing Docker image sizes
+- Multi-stage build setup
+
+## Dockerfile Best Practices
+
+### Multi-Stage Build Pattern
+\\\`\\\`\\\`dockerfile
+# Stage 1: Build
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY . .
+RUN npm run build
+
+# Stage 2: Production
+FROM node:22-alpine
+WORKDIR /app
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+USER node
+CMD ["node", "dist/index.js"]
+\\\`\\\`\\\`
+
+### Image Optimization
+- Use Alpine base images (smaller footprint)
+- Copy package.json before source (leverage layer caching)
+- Use \\\`.dockerignore\\\` to exclude node_modules, .git, tests
+- Run as non-root user
+- Pin specific versions (not \\\`latest\\\`)
+- Combine RUN commands to reduce layers
+
+### Docker Compose for Development
+Essential services pattern:
+- App service with volume mounts for hot reload
+- Database service with persistent volume
+- Redis/cache service if needed
+- Network for service communication
+
+## Container Debugging
+- \\\`docker logs {container}\\\` — check application output
+- \\\`docker exec -it {container} sh\\\` — shell into running container
+- \\\`docker stats\\\` — monitor resource usage
+- \\\`docker inspect {container}\\\` — check config, network, mounts
+- \\\`docker system df\\\` — check disk usage
+
+## Common Issues
+
+| Issue | Likely Cause | Fix |
+|-------|-------------|-----|
+| Container exits immediately | App crashes on start | Check logs, verify CMD/ENTRYPOINT |
+| Port not accessible | Port not mapped or bound to 127.0.0.1 | Check -p flag, bind to 0.0.0.0 |
+| File changes not reflected | Volume not mounted or cached | Check volume mounts in compose |
+| Image too large | No multi-stage, no .dockerignore | Add multi-stage build, dockerignore |
+| Build cache not working | COPY order wrong | Copy deps before source code |
+
+## Workflow
+1. Analyze the application (language, dependencies, build process)
+2. Create Dockerfile with multi-stage build
+3. Create .dockerignore
+4. Create docker-compose.yml for local development
+5. Test build and run
+6. Optimize image size and build time
+
+## Output
+Save configs to project root: \\\`Dockerfile\\\`, \\\`.dockerignore\\\`, \\\`docker-compose.yml\\\``,
+      },
+      {
+        name: "git-workflow",
+        description: "Manage Git workflows — branching strategies, commit conventions, merge conflict resolution, and release management.",
+        emoji: "\uD83C\uDF33",
+        source: "GitHub",
+        sourceUrl: "https://github.com/conventional-changelog/commitlint",
+        instructions: `# Git Workflow
+
+Manage Git branching strategies, commit conventions, and release processes.
+
+## When to Use
+- Setting up Git workflow for a new project
+- Resolving merge conflicts
+- Creating release branches and tags
+- Writing meaningful commit messages
+- Managing feature branches
+
+## Branching Strategies
+
+### GitHub Flow (Recommended for Most Teams)
+- \\\`main\\\` is always deployable
+- Create feature branches from main
+- Open PR when ready for review
+- Merge to main after approval
+- Deploy from main
+
+### Git Flow (For Versioned Releases)
+- \\\`main\\\` — production releases only
+- \\\`develop\\\` — integration branch
+- \\\`feature/*\\\` — new features
+- \\\`release/*\\\` — release prep
+- \\\`hotfix/*\\\` — production fixes
+
+## Commit Message Convention
+
+### Format
+\\\`\\\`\\\`
+type(scope): short description
+
+Longer explanation if needed. Explain WHY, not WHAT.
+
+Refs: #123
+\\\`\\\`\\\`
+
+### Types
+- \\\`feat\\\`: New feature
+- \\\`fix\\\`: Bug fix
+- \\\`docs\\\`: Documentation only
+- \\\`refactor\\\`: Code change that neither fixes nor adds
+- \\\`test\\\`: Adding or updating tests
+- \\\`chore\\\`: Build, tooling, dependency updates
+- \\\`perf\\\`: Performance improvement
+
+## Merge Conflict Resolution
+1. Understand both sides — what was each change trying to do?
+2. Don't just pick one side — the correct resolution may combine both
+3. After resolving, test that the merged code works correctly
+4. If unsure, ask the author of the conflicting change
+
+## Release Process
+1. Create release branch from develop (or main)
+2. Bump version numbers
+3. Update CHANGELOG.md
+4. Final testing and bug fixes on release branch
+5. Merge to main, tag with version
+6. Merge back to develop
+
+## Common Operations
+- Undo last commit (keep changes): \\\`git reset --soft HEAD~1\\\`
+- Stash changes: \\\`git stash\\\` / \\\`git stash pop\\\`
+- Cherry-pick a commit: \\\`git cherry-pick {sha}\\\`
+- Find who changed a line: \\\`git blame {file}\\\`
+- Find when a bug was introduced: \\\`git bisect\\\`
+
+## Output
+Save workflow docs to \\\`./docs/git-workflow.md\\\` or \\\`CONTRIBUTING.md\\\``,
+      },
+      {
+        name: "security-scanner",
+        description: "Scan code for security vulnerabilities — OWASP Top 10, secrets detection, and common exploit patterns.",
+        emoji: "\uD83D\uDEE1\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/semgrep/semgrep",
+        instructions: `# Security Scanner
+
+Scan code for security vulnerabilities and common exploit patterns.
+
+## When to Use
+- Before code reviews and merges
+- Pre-deployment security checks
+- After adding new user-facing features
+- Periodic security audits
+
+## OWASP Top 10 Checklist
+
+### 1. Injection (SQL, NoSQL, Command, LDAP)
+- Are all user inputs parameterized or sanitized?
+- Are ORM queries used instead of raw SQL?
+- Are shell commands constructed from user input?
+
+### 2. Broken Authentication
+- Are passwords hashed with bcrypt/argon2 (not MD5/SHA1)?
+- Is session management secure (httpOnly, secure, sameSite cookies)?
+- Is multi-factor authentication available?
+- Are password reset flows secure?
+
+### 3. Sensitive Data Exposure
+- Is data encrypted in transit (HTTPS everywhere)?
+- Is sensitive data encrypted at rest?
+- Are API keys and secrets in environment variables, not code?
+- Are error messages generic (no stack traces to users)?
+
+### 4. XML External Entities (XXE)
+- Is XML parsing disabled or configured to prevent external entity loading?
+
+### 5. Broken Access Control
+- Are authorization checks on every protected endpoint?
+- Is there object-level authorization (can't access other users' data)?
+- Are admin routes properly restricted?
+
+### 6. Security Misconfiguration
+- Are default credentials changed?
+- Are unnecessary features/ports/services disabled?
+- Are security headers set (CSP, X-Frame-Options, etc.)?
+- Are directory listings disabled?
+
+### 7. Cross-Site Scripting (XSS)
+- Is all output HTML-encoded?
+- Is user content sanitized before rendering?
+- Is Content Security Policy (CSP) configured?
+
+### 8. Insecure Deserialization
+- Is deserialization of untrusted data avoided?
+- Are input types validated before processing?
+
+### 9. Known Vulnerabilities
+- Are all dependencies up to date?
+- Are there known CVEs in the dependency tree?
+
+### 10. Insufficient Logging
+- Are authentication events logged?
+- Are authorization failures logged?
+- Are logs protected from tampering?
+
+## Secrets Detection
+Scan for accidentally committed secrets:
+- API keys, tokens, passwords in source code
+- .env files committed to git
+- Private keys or certificates in repo
+- Database connection strings with credentials
+
+## Workflow
+1. Review code for OWASP Top 10 patterns
+2. Scan for hardcoded secrets
+3. Check dependency vulnerabilities
+4. Review authentication and authorization flows
+5. Check security headers and configurations
+6. Generate findings report with severity and remediation
+
+## Output
+Save to \\\`./docs/security-audit-{date}.md\\\``,
+      },
+      {
+        name: "migration-planner",
+        description: "Plan and execute code migrations — framework upgrades, database migrations, and technology transitions.",
+        emoji: "\uD83D\uDE9A",
+        source: "GitHub",
+        sourceUrl: "https://github.com/flyway/flyway",
+        instructions: `# Migration Planner
+
+Plan and execute technology migrations with minimal risk and downtime.
+
+## When to Use
+- Upgrading framework major versions
+- Migrating between databases
+- Moving from monolith to microservices
+- Swapping out a core dependency
+- Language or runtime upgrades
+
+## Migration Framework
+
+### 1. Assessment Phase
+- **Current state**: Document what exists (versions, dependencies, integrations)
+- **Target state**: Define the desired end state
+- **Gap analysis**: What needs to change?
+- **Risk assessment**: What could go wrong?
+- **Effort estimate**: T-shirt sizing per component (S/M/L/XL)
+
+### 2. Strategy Selection
+
+| Strategy | Risk | Downtime | Complexity | When to Use |
+|----------|------|----------|-----------|-------------|
+| Big bang | High | Yes | Low | Small projects, simple changes |
+| Strangler fig | Low | No | Medium | Incremental replacement |
+| Blue-green | Low | Minimal | High | Zero-downtime required |
+| Feature flags | Low | No | Medium | Gradual rollout |
+| Parallel run | Low | No | High | Data-critical systems |
+
+### 3. Execution Plan
+For each component:
+- Pre-migration tasks (backup, test, document)
+- Migration steps (ordered, with rollback plan)
+- Verification steps (tests, smoke tests, monitoring)
+- Post-migration cleanup (remove old code, update docs)
+
+### 4. Rollback Plan
+For every migration step:
+- What triggers a rollback?
+- How to rollback (specific commands)
+- How long does rollback take?
+- What data might be lost?
+
+## Database Migration Checklist
+- Schema changes backward-compatible?
+- Data migration script tested on production copy?
+- Indexes created CONCURRENTLY?
+- Migration can run while app is serving traffic?
+- Rollback script prepared and tested?
+
+## Workflow
+1. Document current and target state
+2. Identify all affected components
+3. Choose migration strategy
+4. Create step-by-step execution plan with rollback at each step
+5. Estimate timeline and resources
+6. Get team review and approval
+7. Execute with monitoring at each step
+
+## Output
+Save to \\\`./docs/migrations/{migration-name}/plan.md\\\``,
+      },
+      {
+        name: "refactor-assistant",
+        description: "Identify code smells and refactor patterns — extract functions, simplify logic, and improve code structure.",
+        emoji: "\u267B\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/SonarSource/sonarqube",
+        instructions: `# Refactor Assistant
+
+Identify code smells and apply systematic refactoring patterns to improve code quality.
+
+## When to Use
+- Code is hard to understand or modify
+- Adding a feature requires touching too many files
+- Duplicated logic across the codebase
+- Functions are too long or complex
+- Tech debt paydown sprints
+
+## Code Smell Detection
+
+### Size Smells
+- **Long function** (>50 lines): Extract smaller functions
+- **Large class** (>300 lines): Split into focused classes
+- **Long parameter list** (>4 params): Use parameter objects
+- **Deep nesting** (>3 levels): Early returns, extract conditions
+
+### Duplication Smells
+- **Copy-paste code**: Extract shared function or module
+- **Similar logic in different files**: Create a shared utility
+- **Repeated conditionals**: Strategy pattern or polymorphism
+
+### Coupling Smells
+- **Feature envy**: Function uses another class's data more than its own
+- **Shotgun surgery**: One change requires edits across many files
+- **Inappropriate intimacy**: Classes know too much about each other
+
+### Naming Smells
+- **Mysterious names**: \\\`data\\\`, \\\`temp\\\`, \\\`x\\\`, \\\`result\\\` — rename to intent
+- **Misleading names**: Name doesn't match what it does
+- **Inconsistent names**: Same concept, different names across codebase
+
+## Refactoring Patterns
+
+| Pattern | When to Apply | Technique |
+|---------|--------------|-----------|
+| Extract Function | Long function, repeated code block | Pull block into named function |
+| Extract Variable | Complex expression | Assign to descriptively named variable |
+| Inline Function | Function body is as clear as name | Replace call with body |
+| Move Function | Function belongs in different module | Move to better home |
+| Replace Conditional with Polymorphism | Long switch/if chains | Use strategy pattern |
+| Introduce Parameter Object | Many related params | Group into a typed object |
+| Replace Magic Numbers | Hardcoded values | Use named constants |
+
+## Refactoring Safety Rules
+1. **Never refactor without tests** — if tests don't exist, write them first
+2. **Small steps** — one refactoring at a time, verify tests pass after each
+3. **No behavior changes** — refactoring should not change what the code does
+4. **Commit after each step** — easy to revert if something breaks
+
+## Workflow
+1. Identify the code smell or area needing improvement
+2. Ensure test coverage exists (write tests if not)
+3. Apply the appropriate refactoring pattern
+4. Run tests after each change
+5. Commit with clear message describing the refactoring
+
+## Output
+Document refactoring plan in \\\`./docs/refactoring/{area}.md\\\` with before/after examples`,
       },
     ],
     heartbeat: `# HEARTBEAT.md — Dev Copilot
@@ -4025,6 +6369,747 @@ Analyze customer communications for sentiment and escalation risk.
 ## Output
 sentiment, confidence, risk_level, escalation_signals, recommended_approach`,
       },
+      {
+        name: "escalation-router",
+        description: "Route escalated tickets to the right team or specialist based on issue type, severity, and customer tier.",
+        emoji: "\uD83D\uDEA8",
+        source: "GitHub",
+        sourceUrl: "https://github.com/chatwoot/chatwoot",
+        instructions: `# Escalation Router
+
+Route escalated support tickets to the right team with proper context and urgency.
+
+## When to Use
+- Ticket requires engineering involvement (bug, outage)
+- Customer requests to speak with a manager
+- SLA is about to breach or has breached
+- Issue involves billing disputes or legal matters
+- VIP/enterprise customer with high-severity issue
+
+## Escalation Decision Matrix
+
+| Issue Type | First Escalation | Second Escalation | SLA |
+|-----------|-----------------|-------------------|-----|
+| Service outage | Engineering On-Call | VP Engineering | 15 min response |
+| Data loss/breach | Security + Engineering | CTO + Legal | Immediate |
+| Billing dispute >$1K | Billing Manager | Finance Director | 4 hours |
+| Feature blocker (enterprise) | Product Manager | VP Product | 24 hours |
+| Customer threatening churn | Customer Success | VP CS or CEO | 4 hours |
+| Legal/compliance | Legal Team | General Counsel | 24 hours |
+| Bug (P1 - blocking) | Engineering Lead | Engineering Manager | 1 hour |
+| Bug (P2 - degraded) | Engineering Queue | Engineering Lead | 4 hours |
+
+## Escalation Handoff Template
+
+When routing a ticket, always include:
+
+### Context Summary
+- **Customer**: Name, plan tier, ARR, tenure
+- **Issue**: One-sentence description
+- **Impact**: Who's affected and how severely
+- **History**: Previous contacts about this issue (number, dates)
+- **What's been tried**: Troubleshooting steps already taken
+- **Customer sentiment**: Current emotional state
+
+### Urgency Indicators
+- SLA status: time remaining or already breached
+- Customer tier: enterprise/growth/starter
+- Revenue at risk: estimated ARR impact
+- Public exposure: is this on social media or public forums?
+
+### Requested Action
+- What do we need the escalation team to do?
+- By when do we need a response?
+- What should the customer be told in the meantime?
+
+## Workflow
+1. Assess if escalation is warranted (not everything needs escalation)
+2. Determine the right escalation path based on issue type
+3. Prepare the handoff with full context
+4. Notify the customer that it's been escalated (with expected timeline)
+5. Follow up until resolution is confirmed
+6. Log escalation outcome for pattern analysis
+
+## Output
+Save escalation to \\\`./tickets/{ticket-id}/escalation.md\\\``,
+      },
+      {
+        name: "canned-response-library",
+        description: "Create and maintain a library of pre-written support responses for common issues, customizable per situation.",
+        emoji: "\uD83D\uDCDD",
+        source: "GitHub",
+        sourceUrl: "https://github.com/chatwoot/chatwoot",
+        instructions: `# Canned Response Library
+
+Create and maintain reusable support response templates for common issues.
+
+## When to Use
+- Responding to frequently asked questions
+- Training new support team members
+- Ensuring consistent messaging across the team
+- Speeding up response times on common tickets
+
+## Response Categories
+
+### Account & Access
+- Password reset instructions
+- Account lockout resolution
+- Permission/role change requests
+- Two-factor authentication setup
+- SSO configuration help
+
+### Billing & Subscription
+- Invoice/receipt request
+- Plan upgrade/downgrade process
+- Refund policy explanation
+- Payment method update
+- Billing cycle explanation
+
+### Product Issues
+- Known bug acknowledgment (with workaround)
+- Feature not working as expected
+- Integration setup help
+- Data import/export guidance
+- Performance troubleshooting
+
+### General
+- Welcome / onboarding
+- Feature request acknowledgment
+- Scheduled maintenance notification
+- Service disruption update
+- Positive review / NPS follow-up
+
+## Response Template Format
+
+Each canned response should include:
+1. **Name**: Short identifier (e.g., "password-reset-instructions")
+2. **Category**: Which bucket it belongs to
+3. **Trigger phrases**: Keywords that suggest this response (for auto-suggest)
+4. **Subject line**: Pre-written email subject
+5. **Body**: The response text with \\\`{variables}\\\` for personalization
+6. **Tone**: Professional / Empathetic / Urgent
+7. **Follow-up**: What to do if the customer replies
+
+## Writing Guidelines
+- Open with empathy (acknowledge the issue)
+- Lead with the solution (don't make them read paragraphs first)
+- Use numbered steps for procedures
+- Include links to relevant KB articles
+- Close with a clear next step or offer of further help
+- Keep under 200 words
+- Always personalize: use their name, reference their specific issue
+
+## Workflow
+1. Identify the top 20 most common ticket types
+2. Draft a response for each
+3. Review for tone, accuracy, and completeness
+4. Organize by category
+5. Include trigger phrases for quick lookup
+6. Review and update quarterly
+
+## Output
+Save to \\\`./responses/{category}/{response-name}.md\\\``,
+      },
+      {
+        name: "sla-monitor",
+        description: "Track SLA compliance across tickets, alert on approaching breaches, and generate SLA performance reports.",
+        emoji: "\u23F0",
+        source: "GitHub",
+        sourceUrl: "https://github.com/zammad/zammad",
+        instructions: `# SLA Monitor
+
+Track and enforce SLA compliance across all support tickets.
+
+## When to Use
+- Monitoring active tickets for SLA compliance
+- Generating weekly/monthly SLA reports
+- Alerting on approaching SLA breaches
+- Identifying systemic SLA issues
+
+## SLA Definitions
+
+### Response Time SLAs
+
+| Priority | First Response | Update Frequency | Resolution Target |
+|----------|---------------|-----------------|-------------------|
+| P1 Critical | 15 minutes | Every 1 hour | 4 hours |
+| P2 High | 1 hour | Every 4 hours | 8 hours |
+| P3 Medium | 4 hours | Every 24 hours | 48 hours |
+| P4 Low | 24 hours | Every 48 hours | 5 business days |
+
+### SLA Status Levels
+
+| Status | Definition | Action |
+|--------|-----------|--------|
+| Green | >25% time remaining | Normal processing |
+| Yellow | <25% time remaining | Priority bump, assign senior agent |
+| Red | <10% time remaining | Escalate immediately |
+| Breached | SLA exceeded | Incident report, customer notification |
+
+## Monitoring Workflow
+1. Check all open tickets against SLA timers
+2. Calculate time remaining for each ticket
+3. Flag tickets in Yellow/Red/Breached status
+4. Generate alerts for approaching breaches
+5. Recommend actions (reassign, escalate, ping assignee)
+
+## SLA Report Metrics
+
+| Metric | Formula | Target |
+|--------|---------|--------|
+| SLA compliance rate | Tickets within SLA / Total tickets | >95% |
+| Average first response | Mean time to first response | Varies by priority |
+| Average resolution time | Mean time to close | Varies by priority |
+| Breach rate by priority | Breaches per priority level | <5% |
+| Breach rate by category | Breaches per ticket category | Identify problem areas |
+
+## Root Cause Analysis for Breaches
+For each breach, document:
+- Ticket ID and priority
+- SLA target vs. actual time
+- Why it breached (understaffed, complex issue, waiting on engineering, etc.)
+- Preventive action
+
+## Output
+- Alert digest: \\\`./sla/alerts-{date}.md\\\`
+- SLA report: \\\`./sla/report-{period}.md\\\``,
+      },
+      {
+        name: "customer-health-scorer",
+        description: "Score customer health based on usage, support interactions, sentiment, and engagement signals.",
+        emoji: "\uD83D\uDC9A",
+        source: "GitHub",
+        sourceUrl: "https://github.com/chatwoot/chatwoot",
+        instructions: `# Customer Health Scorer
+
+Score and monitor customer health to predict churn and identify expansion opportunities.
+
+## When to Use
+- Monthly customer health reviews
+- Identifying at-risk accounts for proactive outreach
+- Prioritizing customer success efforts
+- Preparing for QBRs and renewals
+
+## Health Score Model
+
+### Usage Health (0-30 points)
+
+| Indicator | Healthy (30) | At Risk (15) | Critical (0) |
+|-----------|-------------|-------------|--------------|
+| Login frequency | Daily/weekly | Monthly | No login 30+ days |
+| Feature adoption | Using 5+ features | Using 2-4 | Using 1 or none |
+| Active users | Growing | Stable | Declining |
+| Usage trend | Increasing | Flat | Decreasing |
+
+### Support Health (0-25 points)
+
+| Indicator | Healthy (25) | At Risk (12) | Critical (0) |
+|-----------|-------------|-------------|--------------|
+| Ticket volume | Low, stable | Increasing | Spike or P1s |
+| Resolution satisfaction | Positive CSAT | Neutral | Negative CSAT |
+| Escalation frequency | Rare | Occasional | Frequent |
+| Open issues | 0-1 | 2-3 | 4+ unresolved |
+
+### Relationship Health (0-25 points)
+
+| Indicator | Healthy (25) | At Risk (12) | Critical (0) |
+|-----------|-------------|-------------|--------------|
+| Executive sponsor | Engaged | Passive | No sponsor / left |
+| Champion status | Active advocate | Neutral | Detractor |
+| Communication | Regular check-ins | Sporadic | Radio silence |
+| Renewal signals | Positive | Uncertain | Negative |
+
+### Financial Health (0-20 points)
+
+| Indicator | Healthy (20) | At Risk (10) | Critical (0) |
+|-----------|-------------|-------------|--------------|
+| Payment status | Current | Late payments | Overdue |
+| Contract value | Growing | Flat | Downgrade requests |
+| Expansion potential | High | Medium | None |
+
+### Score Interpretation
+
+| Total Score | Health | Action |
+|------------|--------|--------|
+| 80-100 | Excellent | Expansion opportunity — upsell/cross-sell |
+| 60-79 | Good | Maintain engagement, monitor |
+| 40-59 | At Risk | Proactive outreach, address concerns |
+| 20-39 | Critical | Executive intervention, save plan |
+| 0-19 | Red Alert | Immediate action, likely churning |
+
+## Workflow
+1. Gather data for each scoring dimension
+2. Calculate component scores and total
+3. Compare to previous period (trending up/down?)
+4. Flag accounts that dropped 15+ points
+5. Generate action plans for At Risk and Critical accounts
+
+## Output
+Save to \\\`./health/customer-health-{date}.csv\\\` and \\\`./health/summary-{date}.md\\\``,
+      },
+      {
+        name: "bug-report-writer",
+        description: "Transform customer reports into structured, reproducible bug reports for the engineering team.",
+        emoji: "\uD83D\uDC1B",
+        source: "GitHub",
+        sourceUrl: "https://github.com/osTicket/osTicket",
+        instructions: `# Bug Report Writer
+
+Transform vague customer reports into clear, actionable bug reports for engineering.
+
+## When to Use
+- Customer reports a product issue that appears to be a bug
+- Support agent has confirmed the issue and needs to file a report
+- Multiple customers report the same issue (consolidate reports)
+
+## Bug Report Template
+
+### Title
+Clear, specific, searchable: "[Component] Specific behavior when doing X"
+- Good: "Dashboard: Export to CSV returns empty file when date range > 30 days"
+- Bad: "Export broken"
+
+### Severity
+
+| Level | Definition | Examples |
+|-------|-----------|---------|
+| Critical | Service down, data loss, security | App crashes, data corruption |
+| High | Core feature broken, no workaround | Cannot create new records |
+| Medium | Feature impaired, workaround exists | Filter doesn't work but search does |
+| Low | Cosmetic, minor inconvenience | Alignment issue, typo |
+
+### Bug Report Body
+
+1. **Summary**: One-sentence description
+2. **Steps to Reproduce**:
+   - Step 1: Go to [specific page/feature]
+   - Step 2: Click [specific button/action]
+   - Step 3: Enter [specific data]
+   - Step 4: Observe [the bug]
+3. **Expected behavior**: What should happen
+4. **Actual behavior**: What actually happens
+5. **Environment**: Browser, OS, account, plan, user role
+6. **Frequency**: Always / Sometimes / Once
+7. **Workaround**: Is there one? Describe it
+8. **Customer impact**: How many customers affected, ARR at risk
+9. **Screenshots/recordings**: Attach if available
+10. **Related tickets**: Link to customer support tickets
+
+## Quality Checklist
+- [ ] Title is specific and searchable
+- [ ] Steps to reproduce are detailed enough for anyone to follow
+- [ ] Expected vs. actual behavior is clear
+- [ ] Severity is assigned and justified
+- [ ] Customer impact is quantified
+- [ ] Environment details are complete
+
+## Workflow
+1. Understand the customer's issue from their description
+2. Reproduce the issue yourself (if possible)
+3. Document exact steps to reproduce
+4. Note the environment and configuration
+5. Assess severity and customer impact
+6. Write the bug report using the template
+7. Link to the original support ticket
+
+## Output
+Save to \\\`./bugs/{bug-id}.md\\\``,
+      },
+      {
+        name: "onboarding-guide-builder",
+        description: "Create step-by-step onboarding guides for new customers to reach time-to-value quickly.",
+        emoji: "\uD83C\uDF93",
+        source: "GitHub",
+        sourceUrl: "https://github.com/facebook/docusaurus",
+        instructions: `# Onboarding Guide Builder
+
+Create structured onboarding guides that help new customers reach value quickly.
+
+## When to Use
+- Setting up onboarding flows for new features or products
+- Customer asks "how do I get started?"
+- Reducing time-to-value for new signups
+- Creating self-serve onboarding for different user personas
+
+## Onboarding Framework
+
+### The 5-Minute Win
+Every onboarding should get the user to their first "aha moment" within 5 minutes:
+- What's the simplest valuable thing they can accomplish?
+- Remove every unnecessary step between signup and that moment
+- Celebrate the win with clear feedback
+
+### Onboarding Phases
+
+| Phase | Goal | Timeline |
+|-------|------|----------|
+| Welcome | Set expectations, orient the user | First 5 minutes |
+| Quick Win | Experience core value once | First 30 minutes |
+| Core Setup | Configure for their use case | First day |
+| Habit Building | Establish regular usage patterns | First week |
+| Proficiency | Using advanced features | First month |
+
+### Guide Structure
+
+For each phase, include:
+1. **Objective**: What they'll accomplish
+2. **Prerequisites**: What they need before starting
+3. **Steps**: Numbered, with screenshots placeholders
+4. **Checkpoint**: How they know they're done
+5. **Next**: What to do after completing this phase
+
+### Personalization
+Create variants for different:
+- User roles (admin vs. user vs. viewer)
+- Use cases (which problem they're solving)
+- Plan tiers (feature availability varies)
+- Technical skill level (technical vs. non-technical)
+
+## Onboarding Checklist Template
+- [ ] Account created and verified
+- [ ] Profile/settings configured
+- [ ] First [core action] completed
+- [ ] Team members invited (if applicable)
+- [ ] Integration connected (if applicable)
+- [ ] First report/output generated
+- [ ] Help resources bookmarked
+
+## Workflow
+1. Identify the target persona and their primary use case
+2. Define the "aha moment" — what's the first valuable outcome?
+3. Map the minimum steps from signup to aha moment
+4. Write step-by-step guide for each onboarding phase
+5. Add screenshots, tips, and common pitfalls
+6. Include links to relevant KB articles
+
+## Output
+Save to \\\`./kb/onboarding/{persona}/getting-started.md\\\``,
+      },
+      {
+        name: "csat-analyzer",
+        description: "Analyze CSAT survey responses to identify trends, common complaints, and improvement opportunities.",
+        emoji: "\uD83D\uDCCA",
+        source: "GitHub",
+        sourceUrl: "https://github.com/chatwoot/chatwoot",
+        instructions: `# CSAT Analyzer
+
+Analyze customer satisfaction survey responses to identify actionable improvement opportunities.
+
+## When to Use
+- Monthly/quarterly CSAT review meetings
+- After support process changes (measure impact)
+- When CSAT scores drop below target
+- Planning support team improvements
+
+## CSAT Score Interpretation
+
+| Score Range | Label | Action |
+|------------|-------|--------|
+| 9-10 | Promoter | Ask for testimonial, reference, or review |
+| 7-8 | Passive | Identify what would make it a 10 |
+| 5-6 | Detractor | Proactive outreach, understand concerns |
+| 1-4 | Critical | Immediate follow-up, escalate to manager |
+
+## Analysis Framework
+
+### Quantitative Metrics
+- **Overall CSAT**: Average score across all responses
+- **CSAT by category**: Score per ticket type (billing, bug, how-to)
+- **CSAT by agent**: Individual agent performance
+- **CSAT by channel**: Email vs. chat vs. phone
+- **Response rate**: % of customers who completed survey
+- **Trend**: Is CSAT improving, stable, or declining?
+
+### Qualitative Analysis (Free-Text Responses)
+- **Theme extraction**: Group comments into categories
+- **Sentiment classification**: Positive, neutral, negative per theme
+- **Frequency analysis**: Most mentioned topics
+- **Actionability**: Which themes can we actually improve?
+
+### Common Themes to Track
+
+| Theme | Positive Signals | Negative Signals |
+|-------|-----------------|-----------------|
+| Response time | "Quick response", "fast" | "Waited too long", "slow" |
+| Agent quality | "Knowledgeable", "helpful" | "Didn't understand", "rude" |
+| Resolution | "Solved it", "fixed" | "Still not working", "unresolved" |
+| Communication | "Clear", "kept me updated" | "Confusing", "no follow-up" |
+| Product | "Love the feature", "works great" | "Buggy", "missing feature" |
+
+## Workflow
+1. Load CSAT data (scores + comments)
+2. Calculate quantitative metrics and trends
+3. Extract themes from free-text responses
+4. Cross-reference low scores with themes
+5. Identify top 3 improvement opportunities
+6. Generate actionable recommendations
+7. Compare to previous period
+
+## Output
+Save to \\\`./reports/csat-analysis-{period}.md\\\``,
+      },
+      {
+        name: "faq-manager",
+        description: "Build and maintain FAQ pages from common support questions, with search-optimized answers.",
+        emoji: "\u2753",
+        source: "GitHub",
+        sourceUrl: "https://github.com/helpyio/helpy",
+        instructions: `# FAQ Manager
+
+Build and maintain FAQ pages that reduce support ticket volume.
+
+## When to Use
+- Recurring questions that don't need a full KB article
+- Launching new features (preemptive FAQ)
+- Reducing support ticket volume
+- Improving self-service resolution rate
+
+## FAQ Structure
+
+### Question Format
+- Use the exact phrasing customers use (not internal jargon)
+- Start with question words: How, What, Why, Can I, Where
+- Keep questions concise (under 15 words)
+- Include common variations as hidden text (for searchability)
+
+### Answer Format
+1. **Direct answer** (first sentence): Answer the question immediately
+2. **Brief explanation** (1-2 sentences): Context if needed
+3. **Steps** (if procedural): Numbered list
+4. **Link**: Point to detailed KB article for more info
+5. **Related questions**: Cross-link to related FAQs
+
+### Example
+**Q: How do I reset my password?**
+A: Click "Forgot Password" on the login page and enter your email. You'll receive a reset link within 2 minutes. If you don't see it, check your spam folder.
+[Detailed instructions: Password Reset Guide]
+
+## Organization
+Group FAQs by category:
+- Getting Started
+- Account & Billing
+- Features & Usage
+- Troubleshooting
+- Security & Privacy
+- API & Integrations
+
+## FAQ Prioritization
+Rank by:
+1. **Volume**: How often is this asked? (check ticket data)
+2. **Impact**: Does answering this prevent a ticket?
+3. **Complexity**: Can it be answered in <100 words?
+4. **Freshness**: Is the answer still accurate?
+
+## Workflow
+1. Analyze top support ticket topics (last 30 days)
+2. Identify questions that can be self-served
+3. Write FAQ entries using the question/answer format
+4. Organize by category
+5. Review monthly: add new FAQs, retire outdated ones
+6. Track deflection rate (tickets reduced per FAQ published)
+
+## Output
+Save to \\\`./kb/faq/{category}.md\\\``,
+      },
+      {
+        name: "response-template-writer",
+        description: "Draft empathetic, professional support responses tailored to the customer's issue and emotional state.",
+        emoji: "\u270D\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/chatwoot/chatwoot",
+        instructions: `# Response Template Writer
+
+Draft personalized support responses that resolve issues and maintain customer satisfaction.
+
+## When to Use
+- Replying to any support ticket
+- Crafting responses for sensitive situations
+- Writing proactive outreach messages
+- Handling angry or frustrated customers
+
+## Response Framework by Customer State
+
+### Frustrated Customer
+1. **Acknowledge**: "I understand how frustrating this must be"
+2. **Take ownership**: "Let me take care of this for you"
+3. **Explain**: What happened and why (briefly, no blame)
+4. **Resolve**: Concrete steps you're taking right now
+5. **Compensate**: If appropriate, offer a goodwill gesture
+6. **Prevent**: What you'll do to prevent recurrence
+
+### Confused Customer
+1. **Normalize**: "Great question — this trips up a lot of people"
+2. **Simplify**: Explain in plain language, no jargon
+3. **Guide**: Step-by-step instructions
+4. **Verify**: "Does this make sense? Happy to walk through it together"
+5. **Resource**: Link to visual guide or video
+
+### VIP/Enterprise Customer
+1. **Personalize**: Reference their account, history, and relationship
+2. **Priority**: Acknowledge their importance
+3. **Action**: Concrete plan with timeline
+4. **Escalation path**: Who else is involved
+5. **Follow-up**: Proactive update schedule
+
+### Feature Request
+1. **Appreciate**: "Thanks for sharing this — it's a great idea"
+2. **Context**: "Several customers have asked for something similar"
+3. **Status**: What's on the roadmap (or not, and why)
+4. **Workaround**: If one exists, share it
+5. **Loop in**: "I've added your feedback to the request for our product team"
+
+## Tone Guidelines
+- Professional but warm (not robotic)
+- Use their name
+- Avoid: "Unfortunately", "I'm afraid", "Policy states"
+- Prefer: "Here's what I can do", "Let me help with that", "Good news"
+- Match their communication style (casual customer = slightly casual response)
+
+## Quality Checklist
+- [ ] Addresses the actual question/issue (not tangential)
+- [ ] Empathy before solution
+- [ ] Clear next steps
+- [ ] Under 200 words (unless complex issue requires more)
+- [ ] Proofread for typos and tone
+
+## Output
+Draft responses directly in ticket replies or save templates to \\\`./responses/\\\``,
+      },
+      {
+        name: "ticket-analytics",
+        description: "Analyze support ticket trends — volume, categories, resolution times, and team performance over time.",
+        emoji: "\uD83D\uDCC9",
+        source: "GitHub",
+        sourceUrl: "https://github.com/zammad/zammad",
+        instructions: `# Ticket Analytics
+
+Analyze support ticket data to identify trends, bottlenecks, and improvement opportunities.
+
+## When to Use
+- Weekly/monthly support team reviews
+- Identifying recurring issues that need product fixes
+- Staffing and capacity planning
+- Measuring impact of process changes
+
+## Key Metrics
+
+### Volume Metrics
+- **Total tickets**: By day, week, month
+- **Tickets by category**: Bug, how-to, billing, feature request
+- **Tickets by channel**: Email, chat, phone, social
+- **New vs. recurring**: First contact vs. follow-up on same issue
+- **Self-service deflection**: KB views that didn't result in a ticket
+
+### Efficiency Metrics
+
+| Metric | Formula | Target |
+|--------|---------|--------|
+| First response time | Time from ticket creation to first response | Varies by SLA |
+| Resolution time | Time from creation to resolved | Varies by priority |
+| First contact resolution | Tickets resolved in one response / total | >60% |
+| Touches to resolve | Average number of agent responses per ticket | <3 |
+| Reopen rate | Tickets reopened after resolution / total resolved | <10% |
+| Agent utilization | Active ticket handling time / total work time | 70-80% |
+
+### Quality Metrics
+- **CSAT by agent**: Which agents get the highest satisfaction?
+- **Escalation rate**: % of tickets that require escalation
+- **SLA compliance**: % of tickets resolved within SLA
+- **Knowledge gap**: Topics with no KB article that generate tickets
+
+## Trend Analysis
+For each metric, track:
+- Current period value
+- Previous period comparison
+- Trend direction (improving, stable, declining)
+- Seasonal patterns (if applicable)
+
+## Bottleneck Detection
+Look for:
+- Categories with longest resolution times
+- Stages where tickets get stuck
+- Time-of-day patterns (understaffed periods)
+- Agent workload imbalances
+
+## Workflow
+1. Pull ticket data for the analysis period
+2. Calculate all key metrics
+3. Compare to previous period and targets
+4. Identify top 3 positive trends and top 3 concerns
+5. Generate specific recommendations for improvement
+6. Create visual summary for team meeting
+
+## Output
+Save to \\\`./reports/ticket-analytics-{period}.md\\\``,
+      },
+      {
+        name: "macro-builder",
+        description: "Create support workflow macros — automated actions, ticket routing rules, and auto-response triggers.",
+        emoji: "\u2699\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/n8n-io/n8n",
+        instructions: `# Macro Builder
+
+Create automated support workflows, routing rules, and response triggers.
+
+## When to Use
+- Automating repetitive ticket handling tasks
+- Setting up auto-routing for specific ticket types
+- Creating one-click actions for common operations
+- Building notification triggers for team alerts
+
+## Macro Types
+
+### Auto-Categorization
+Trigger: Keywords in ticket subject or body
+Action: Set category, priority, and tags automatically
+
+| Keywords | Category | Priority | Tags |
+|----------|----------|----------|------|
+| "can't login", "password", "locked out" | account-issue | P3 | auth, access |
+| "crash", "error 500", "down" | bug | P2 | engineering, outage |
+| "invoice", "charge", "refund" | billing | P3 | finance |
+| "cancel", "close account", "delete" | churn-risk | P2 | retention |
+
+### Auto-Routing
+Route tickets to the right team/person based on:
+- Category (billing -> finance team)
+- Customer tier (enterprise -> senior agent)
+- Language (non-English -> multilingual agent)
+- Product area (API -> developer support)
+- Time zone (route to on-duty team)
+
+### Auto-Response
+Send immediate acknowledgment based on:
+- Priority level (P1 = "We're investigating immediately")
+- Category (billing = "Our billing team will review within 4 hours")
+- Business hours (after hours = "We'll respond first thing tomorrow")
+
+### One-Click Macros
+Common agent actions bundled into a single click:
+- **Close as resolved**: Set status, send satisfaction survey, log resolution
+- **Escalate to engineering**: Change priority, assign team, add internal note template
+- **Request more info**: Send template asking for reproduction steps, add "waiting-on-customer" tag
+- **Merge duplicate**: Link tickets, close duplicate, notify customer
+
+## Macro Design Guidelines
+- Keep macros simple (3-5 actions max)
+- Always include a human review step for destructive actions
+- Test on 10 tickets before enabling broadly
+- Monitor false positive rates weekly
+- Document what each macro does and when it triggers
+
+## Workflow
+1. Identify the most repetitive manual tasks
+2. Define trigger conditions (keywords, properties, events)
+3. Define actions (set field, route, respond, tag)
+4. Write the macro configuration
+5. Test on sample tickets
+6. Monitor and refine
+
+## Output
+Save macro definitions to \\\`./automation/macros/{macro-name}.md\\\``,
+      },
     ],
     heartbeat: `# HEARTBEAT.md — Support Agent
 
@@ -4153,6 +7238,780 @@ Use Slack's mrkdwn format:
 - Include timestamps and context in alerts
 - Group related notifications to reduce noise
 - Use emoji reactions to indicate status (checkmark for done, etc.)`,
+      },
+      {
+        name: "meeting-notes-processor",
+        description: "Process meeting notes into structured summaries with action items, decisions, and follow-ups.",
+        emoji: "\uD83D\uDCDD",
+        source: "GitHub",
+        sourceUrl: "https://github.com/Zackriya-Solutions/meeting-minutes",
+        instructions: `# Meeting Notes Processor
+
+Transform raw meeting notes or transcripts into structured, actionable summaries.
+
+## When to Use
+- After any meeting (standup, planning, client call, 1:1)
+- Processing meeting transcripts from recording tools
+- Creating weekly meeting digest for stakeholders
+- Tracking action items across multiple meetings
+
+## Meeting Summary Template
+
+### Meeting Metadata
+- **Title**: [Meeting name]
+- **Date**: [Date and time]
+- **Duration**: [Length]
+- **Attendees**: [List of participants]
+- **Type**: Standup / Planning / Client / 1:1 / All-hands
+
+### Key Decisions Made
+- Decision 1: [What was decided, who decided it]
+- Decision 2: [What was decided, who decided it]
+
+### Action Items
+
+| Action | Owner | Due Date | Priority |
+|--------|-------|----------|----------|
+| [Task description] | [Name] | [Date] | High/Med/Low |
+
+### Discussion Summary
+- **Topic 1**: [2-3 sentence summary of key points]
+- **Topic 2**: [2-3 sentence summary of key points]
+
+### Parking Lot (Deferred Topics)
+- Items raised but not resolved in this meeting
+
+### Next Meeting
+- Date/time, agenda items to carry forward
+
+## Processing Rules
+- Extract every action item (anything assigned to someone with a deadline)
+- Flag decisions separately from discussions
+- Keep summary concise — executives skim, they don't read transcripts
+- Note any disagreements or unresolved questions
+- Link to relevant documents or previous meeting notes
+
+## Workflow
+1. Receive raw notes or transcript
+2. Identify attendees and meeting type
+3. Extract decisions, action items, and key discussion points
+4. Format into the structured template
+5. Save and notify relevant stakeholders
+
+## Output
+Save to \\\`./meetings/{date}-{meeting-name}.md\\\`
+Append action items to \\\`./tasks/action-items.csv\\\``,
+      },
+      {
+        name: "sop-writer",
+        description: "Create Standard Operating Procedures for repeatable business processes with step-by-step instructions.",
+        emoji: "\uD83D\uDCD6",
+        source: "GitHub",
+        sourceUrl: "https://github.com/facebook/docusaurus",
+        instructions: `# SOP Writer
+
+Create clear, maintainable Standard Operating Procedures for business processes.
+
+## When to Use
+- Documenting a process that needs to be repeatable
+- Onboarding new team members to existing workflows
+- Automating a process (document it first)
+- After process improvements (update the SOP)
+
+## SOP Template
+
+### Header
+- **SOP Title**: [Clear, descriptive name]
+- **Version**: [1.0, 1.1, etc.]
+- **Last Updated**: [Date]
+- **Owner**: [Who maintains this SOP]
+- **Scope**: [What this covers and what it doesn't]
+
+### Purpose
+One paragraph: Why does this process exist? What problem does it solve?
+
+### Prerequisites
+- Tools needed (software, access, credentials)
+- Knowledge needed (training, certifications)
+- Approvals needed before starting
+
+### Procedure
+
+**Step 1: [Action name]**
+- What to do (specific, unambiguous)
+- Where to do it (system, page, button)
+- Expected result
+- If the result is unexpected: [troubleshooting steps]
+
+**Step 2: [Action name]**
+- [Continue pattern...]
+
+### Decision Points
+Use flowcharts or decision tables for branching logic:
+
+| Condition | Action |
+|-----------|--------|
+| If X happens | Do Y |
+| If Z happens | Do W |
+| If unsure | Escalate to [person/role] |
+
+### Quality Checks
+- How to verify the process was completed correctly
+- What to check before marking as done
+- Common mistakes to avoid
+
+### Exception Handling
+- What to do when things go wrong
+- Who to contact for help
+- Rollback procedures if available
+
+## Writing Guidelines
+- Use imperative mood ("Click the button" not "You should click the button")
+- One action per step
+- Include screenshots or diagrams where helpful
+- Avoid jargon — write for someone new to the process
+- Test by having someone unfamiliar follow the SOP
+
+## Workflow
+1. Observe or interview the person who currently does the process
+2. Document each step as they do it
+3. Add decision points, exceptions, and quality checks
+4. Have someone else follow the SOP to test it
+5. Revise based on feedback
+6. Set review schedule (quarterly)
+
+## Output
+Save to \\\`./sops/{process-name}.md\\\``,
+      },
+      {
+        name: "expense-tracker",
+        description: "Track and categorize business expenses, generate spending reports, and flag budget anomalies.",
+        emoji: "\uD83D\uDCB3",
+        source: "GitHub",
+        sourceUrl: "https://github.com/actualbudget/actual",
+        instructions: `# Expense Tracker
+
+Track, categorize, and report on business expenses with budget monitoring.
+
+## When to Use
+- Logging daily/weekly expenses
+- Generating monthly expense reports
+- Monitoring spending against budgets
+- Preparing for tax season or audits
+
+## Expense Categories
+
+| Category | Examples | Typical Budget % |
+|----------|---------|-----------------|
+| Software/SaaS | Tools, subscriptions, licenses | 15-25% |
+| Marketing | Ads, content, events, sponsorships | 20-30% |
+| Travel | Flights, hotels, meals, transport | 5-15% |
+| Office | Supplies, furniture, equipment | 3-8% |
+| Professional Services | Legal, accounting, consulting | 5-10% |
+| Payroll | Salaries, benefits, contractors | 40-60% |
+| Infrastructure | Hosting, domains, cloud services | 5-15% |
+| Meals & Entertainment | Team meals, client dinners | 2-5% |
+
+## Tracking Workflow
+1. Log each expense: date, vendor, amount, category, payment method
+2. Attach receipt reference (file name or link)
+3. Auto-categorize based on vendor (if known)
+4. Flag for review if over threshold or unusual
+5. Reconcile weekly against bank/card statements
+
+## Budget Monitoring
+
+### Alert Thresholds
+
+| Status | Condition | Action |
+|--------|-----------|--------|
+| On Track | <80% of budget spent | Continue monitoring |
+| Warning | 80-95% of budget spent | Review remaining planned expenses |
+| Over Budget | >95% of budget spent | Freeze non-essential spending, escalate |
+| Anomaly | Single expense >2x average | Flag for manager review |
+
+## Reporting
+Monthly expense report should include:
+- Total spend by category (table + chart)
+- Month-over-month comparison
+- Budget vs. actual by category
+- Top 10 vendors by spend
+- Flagged anomalies or unusual expenses
+- Running total vs. annual budget
+
+## Output
+- Expense log: \\\`./expenses/{year}-{month}.csv\\\`
+- Monthly report: \\\`./expenses/reports/{year}-{month}.md\\\``,
+      },
+      {
+        name: "workflow-designer",
+        description: "Map and design automated workflows for repetitive business processes with triggers, conditions, and actions.",
+        emoji: "\uD83D\uDD04",
+        source: "GitHub",
+        sourceUrl: "https://github.com/n8n-io/n8n",
+        instructions: `# Workflow Designer
+
+Design automated workflows for repetitive business processes.
+
+## When to Use
+- A process has 5+ manual steps that repeat regularly
+- Multiple people hand off work in sequence
+- Tasks are being dropped or delayed between steps
+- You're evaluating automation tools (Make, Zapier, n8n)
+
+## Workflow Design Framework
+
+### 1. Map Current Process
+Before automating, document what exists:
+- Who does what, in what order?
+- What triggers the process?
+- Where are the handoffs between people/systems?
+- What are the bottlenecks and failure points?
+- How long does each step take?
+
+### 2. Identify Automation Opportunities
+
+| Step Type | Automation Potential | Examples |
+|-----------|---------------------|---------|
+| Data entry | High | Copy data between systems |
+| Notifications | High | Send alerts on events |
+| File management | High | Move, rename, organize files |
+| Approvals | Medium | Route for approval, send reminders |
+| Decision making | Medium | Rule-based routing |
+| Creative work | Low | Writing, design, strategy |
+| Relationship building | Low | 1:1 conversations, negotiations |
+
+### 3. Design the Workflow
+
+**Trigger**: What starts the workflow?
+- Schedule (daily at 9am)
+- Event (new record created, form submitted)
+- Condition (threshold breached, status changed)
+- Manual (user clicks a button)
+
+**Steps**: Sequence of actions
+- Each step: tool/system, action, inputs, outputs
+- Decision points: if/then branching
+- Error handling: what happens when a step fails
+
+**Output**: What does the workflow produce?
+- Updated records
+- Notifications sent
+- Files created/moved
+- Reports generated
+
+### 4. Error Handling
+For each step:
+- What could go wrong?
+- How to detect the failure
+- Automatic retry (how many times?)
+- Fallback action (notify a person, log the error)
+- Recovery procedure
+
+## Workflow Documentation Template
+\\\`\\\`\\\`
+Name: [Workflow name]
+Trigger: [What starts it]
+Frequency: [How often it runs]
+Owner: [Who maintains it]
+Tools: [Systems involved]
+
+Step 1: [Action]
+  Tool: [System]
+  Input: [Data needed]
+  Output: [Result produced]
+  Error: [What to do if it fails]
+
+Step 2: [Action]
+  ...
+\\\`\\\`\\\`
+
+## Workflow
+1. Interview stakeholders about the current process
+2. Map the as-is workflow
+3. Identify automation opportunities
+4. Design the to-be workflow
+5. Calculate time saved and error reduction
+6. Document the workflow specification
+
+## Output
+Save to \\\`./workflows/{workflow-name}.md\\\``,
+      },
+      {
+        name: "report-generator",
+        description: "Generate recurring business reports — daily digests, weekly summaries, monthly reviews with key metrics.",
+        emoji: "\uD83D\uDCCB",
+        source: "GitHub",
+        sourceUrl: "https://github.com/metabase/metabase",
+        instructions: `# Report Generator
+
+Create recurring business reports with consistent formatting and key metrics.
+
+## When to Use
+- Daily standup summaries
+- Weekly status reports for leadership
+- Monthly business reviews
+- Quarterly OKR updates
+- Ad-hoc reports on specific topics
+
+## Report Types
+
+### Daily Digest
+- Yesterday's key metrics (1-2 lines each)
+- Completed tasks
+- Blockers or issues
+- Today's priorities
+- Keep under 200 words
+
+### Weekly Summary
+- Week's key accomplishments (3-5 bullets)
+- Metrics vs. targets (table format)
+- Risks and blockers
+- Next week's priorities
+- Decisions needed from leadership
+
+### Monthly Review
+- Executive summary (3-5 sentences)
+- Key metrics with month-over-month trend
+- Goal progress (on track / at risk / behind)
+- Major wins and losses
+- Budget status
+- Team updates (hiring, capacity)
+- Priorities for next month
+
+## Report Formatting Rules
+- Lead with the most important information
+- Use tables for data (not paragraphs)
+- Include trend indicators (up/down/flat arrows)
+- Red/yellow/green status for goals
+- Keep executive summaries under 5 sentences
+- Link to detailed data for those who want to dig deeper
+
+## Data Sources
+When generating reports, pull from:
+- \\\`./metrics/\\\` — KPI tracking files
+- \\\`./tasks/\\\` — Task completion data
+- \\\`./expenses/\\\` — Financial data
+- \\\`./meetings/\\\` — Meeting notes and decisions
+- \\\`./pipeline/\\\` — Pipeline data (if applicable)
+
+## Workflow
+1. Identify the report type and audience
+2. Gather data from relevant sources
+3. Calculate metrics and compare to targets/previous period
+4. Write the report following the appropriate template
+5. Highlight areas that need attention
+6. Save and distribute
+
+## Output
+Save to \\\`./reports/{type}-{date}.md\\\``,
+      },
+      {
+        name: "task-manager",
+        description: "Manage tasks, deadlines, and priorities — create to-do lists, track progress, and send reminders.",
+        emoji: "\u2705",
+        source: "GitHub",
+        sourceUrl: "https://github.com/makeplane/plane",
+        instructions: `# Task Manager
+
+Manage tasks, deadlines, and priorities with structured tracking and reminders.
+
+## When to Use
+- Organizing daily/weekly work
+- Tracking project deliverables
+- Managing tasks across team members
+- Following up on overdue items
+
+## Task Structure
+
+### Task Properties
+
+| Property | Description | Required |
+|----------|-----------|----------|
+| Title | Clear description of what needs to be done | Yes |
+| Owner | Who is responsible | Yes |
+| Due date | When it's due | Yes |
+| Priority | P1 (urgent) / P2 (important) / P3 (normal) / P4 (low) | Yes |
+| Status | Not started / In progress / Blocked / Done | Yes |
+| Project | Which project or category | Optional |
+| Notes | Context, links, or details | Optional |
+
+### Priority Matrix (Eisenhower)
+
+| | Urgent | Not Urgent |
+|---|--------|------------|
+| **Important** | P1: Do it now | P2: Schedule it |
+| **Not Important** | P3: Delegate it | P4: Consider dropping |
+
+## Task Workflow
+1. **Capture**: Log every task immediately (don't rely on memory)
+2. **Prioritize**: Assign priority using the matrix above
+3. **Plan**: Pick 3-5 tasks for today (no more — focus beats volume)
+4. **Execute**: Work on P1 tasks first, then P2
+5. **Review**: End of day — update statuses, add tomorrow's tasks
+6. **Weekly review**: Check all tasks, reprioritize, remove stale items
+
+## Task File Format
+Store tasks in CSV or markdown:
+
+\\\`\\\`\\\`
+| Task | Owner | Due | Priority | Status | Project |
+|------|-------|-----|----------|--------|---------|
+| Finalize proposal | Me | 2026-02-10 | P1 | In progress | Sales |
+| Review vendor contract | Legal | 2026-02-14 | P2 | Not started | Ops |
+\\\`\\\`\\\`
+
+## Reminders
+- Daily: List today's tasks and overdue items
+- Weekly: Summary of completed, in-progress, and upcoming tasks
+- On due date: Alert for each task due today
+
+## Output
+Save to \\\`./tasks/tasks.csv\\\` and \\\`./tasks/daily-{date}.md\\\``,
+      },
+      {
+        name: "vendor-manager",
+        description: "Track vendor contracts, renewals, pricing negotiations, and service level compliance.",
+        emoji: "\uD83E\uDD1D",
+        source: "GitHub",
+        sourceUrl: "https://github.com/openprocurement/openprocurement.api",
+        instructions: `# Vendor Manager
+
+Track and manage vendor relationships, contracts, and renewals.
+
+## When to Use
+- Evaluating new vendors
+- Tracking contract renewal dates
+- Negotiating pricing
+- Auditing vendor spend
+- Managing vendor SLAs
+
+## Vendor Tracking Template
+
+### Vendor Profile
+
+| Field | Value |
+|-------|-------|
+| Vendor name | |
+| Category | Software / Services / Infrastructure |
+| Primary contact | Name, email, phone |
+| Contract start date | |
+| Contract end date | |
+| Renewal type | Auto-renew / Manual |
+| Annual cost | |
+| Payment terms | Monthly / Annual / Custom |
+| Cancellation notice | 30 days / 60 days / 90 days |
+
+### Vendor Evaluation Criteria
+
+| Criteria | Weight | Score (1-5) | Notes |
+|----------|--------|------------|-------|
+| Product/service quality | 25% | | Meets requirements? |
+| Price competitiveness | 20% | | Market rate comparison |
+| Support responsiveness | 20% | | SLA compliance |
+| Reliability/uptime | 15% | | Incidents in last year |
+| Integration ease | 10% | | Works with our stack |
+| Contract flexibility | 10% | | Terms, cancellation |
+
+## Renewal Workflow
+1. **90 days before renewal**: Review vendor performance
+2. **60 days before**: Research alternatives and market pricing
+3. **45 days before**: Prepare negotiation position
+4. **30 days before**: Negotiate or decide to switch
+5. **15 days before**: Finalize renewal or initiate transition
+6. **At renewal**: Execute contract, update tracking
+
+## Negotiation Tips
+- Always know the alternative (leverage)
+- Ask for multi-year discounts
+- Request the annual prepay discount
+- Negotiate based on usage (right-size the plan)
+- Ask what discounts are available — they often have unadvertised tiers
+- Time negotiations near vendor's quarter-end
+
+## Output
+- Vendor list: \\\`./vendors/vendor-tracker.csv\\\`
+- Renewal calendar: \\\`./vendors/renewal-calendar.md\\\`
+- Evaluation: \\\`./vendors/{vendor-name}-eval.md\\\``,
+      },
+      {
+        name: "email-automation",
+        description: "Design automated email sequences — welcome flows, reminders, status updates, and digest emails.",
+        emoji: "\uD83D\uDCE7",
+        source: "GitHub",
+        sourceUrl: "https://github.com/knadh/listmonk",
+        instructions: `# Email Automation
+
+Design automated email sequences for internal and external communications.
+
+## When to Use
+- Setting up welcome/onboarding email sequences
+- Automating status update emails
+- Creating reminder sequences for deadlines
+- Building digest emails for recurring reports
+
+## Email Sequence Types
+
+### Welcome/Onboarding Sequence
+| Day | Email | Purpose |
+|-----|-------|---------|
+| 0 | Welcome | Set expectations, quick start link |
+| 1 | Quick Win | Guide to first valuable action |
+| 3 | Tips & Tricks | Power user features |
+| 7 | Check-in | "How's it going?" + support resources |
+| 14 | Success Story | Case study + advanced features |
+
+### Reminder Sequence
+| Timing | Email | Tone |
+|--------|-------|------|
+| 7 days before | Friendly heads-up | Informational |
+| 3 days before | Reminder with details | Slightly urgent |
+| 1 day before | Last chance | Urgent |
+| Day of | Final notice | Action required now |
+| 1 day after (if missed) | Follow-up | Helpful, offer alternative |
+
+### Digest Email
+- Scheduled: daily, weekly, or monthly
+- Content: aggregated metrics, updates, or action items
+- Format: scannable, with links to details
+- Personalized: relevant data per recipient
+
+## Email Design Guidelines
+- **Subject line**: Clear, specific, <60 characters
+- **Preview text**: Extends the subject, <90 characters
+- **Body**: One primary CTA, scannable layout
+- **Sender**: Real person name (not "noreply")
+- **Timing**: Test different send times for best engagement
+
+## Sequence Design Rules
+- Each email should provide standalone value
+- Don't repeat content across emails
+- Include unsubscribe/preference options
+- Set maximum frequency (don't overwhelm recipients)
+- Track open rates, click rates, and unsubscribes per email
+
+## Workflow
+1. Define the sequence goal and audience
+2. Map the email timeline and triggers
+3. Write subject line, preview text, and body for each email
+4. Define trigger conditions (what starts the sequence, what stops it)
+5. Set up tracking and success metrics
+6. Test with sample recipients before launch
+
+## Output
+Save to \\\`./automation/email-sequences/{sequence-name}/\\\``,
+      },
+      {
+        name: "document-organizer",
+        description: "Create file organization systems with naming conventions, folder structures, and archival policies.",
+        emoji: "\uD83D\uDCC2",
+        source: "GitHub",
+        sourceUrl: "https://github.com/makeplane/plane",
+        instructions: `# Document Organizer
+
+Create and maintain file organization systems for team documents and data.
+
+## When to Use
+- Setting up a new project's file structure
+- Cleaning up an existing messy file system
+- Creating naming conventions for the team
+- Establishing archival and retention policies
+
+## Folder Structure Template
+
+\\\`\\\`\\\`
+project-root/
+  docs/           # Documentation, specs, guides
+  data/           # Raw and processed data files
+  reports/        # Generated reports and analytics
+  templates/      # Reusable templates and frameworks
+  meetings/       # Meeting notes and recordings
+  tasks/          # Task lists and project tracking
+  archive/        # Completed or old items
+    {year}/       # Archived by year
+  config/         # Configuration and settings files
+\\\`\\\`\\\`
+
+## Naming Conventions
+
+### Files
+- Use kebab-case: \\\`quarterly-report-q1-2026.md\\\`
+- Include date for time-sensitive docs: \\\`{yyyy-mm-dd}-{description}.{ext}\\\`
+- Version suffix for iterative docs: \\\`proposal-v2.md\\\`
+- No spaces, no special characters (except hyphens and underscores)
+
+### Folders
+- Lowercase, descriptive, no abbreviations
+- Max 2 levels deep (avoid deeply nested structures)
+- Group by function, not by person
+
+## Archival Policy
+- Move to \\\`archive/{year}/\\\` when:
+  - Project is complete
+  - Document hasn't been accessed in 6+ months
+  - Superseded by a newer version
+- Never delete — archive instead (storage is cheap, regret isn't)
+- Tag archived items with date and reason
+
+## Organization Workflow
+1. Audit current file state (what exists, where, duplicates)
+2. Define folder structure and naming conventions
+3. Create the structure
+4. Move and rename existing files
+5. Delete obvious duplicates
+6. Document the system in a README
+7. Set quarterly review reminder
+
+## Output
+Create folder structure and save conventions to \\\`./docs/file-organization.md\\\``,
+      },
+      {
+        name: "process-auditor",
+        description: "Audit business processes for inefficiencies, bottlenecks, and automation opportunities with ROI estimates.",
+        emoji: "\uD83D\uDD0D",
+        source: "GitHub",
+        sourceUrl: "https://github.com/n8n-io/n8n",
+        instructions: `# Process Auditor
+
+Audit business processes to find inefficiencies and quantify automation opportunities.
+
+## When to Use
+- Quarterly operational reviews
+- Before investing in new tools or automation
+- When teams complain about too much manual work
+- After team growth (processes that worked for 5 don't work for 50)
+
+## Audit Framework
+
+### 1. Process Inventory
+List all recurring processes with:
+- Name and description
+- Frequency (daily, weekly, monthly)
+- Owner (who does it)
+- Time spent per occurrence
+- Tools used
+- Dependencies (what needs to happen before/after)
+
+### 2. Inefficiency Detection
+
+| Inefficiency | Symptoms | Impact |
+|-------------|----------|--------|
+| Manual data entry | Copy-pasting between systems | Time waste, errors |
+| Approval bottlenecks | Tasks waiting on one person | Delays |
+| Duplicate work | Same task done by multiple people | Wasted effort |
+| Over-processing | More steps than needed | Slow cycle time |
+| Context switching | Frequent tool/task switching | Lost productivity |
+| Information silos | Searching for data across systems | Time waste |
+
+### 3. Impact Quantification
+For each inefficiency:
+\\\`\\\`\\\`
+Time wasted = (time per occurrence) x (frequency) x (people affected)
+Annual cost = time wasted x hourly rate x 52
+Error cost = (error rate) x (cost per error) x (annual volume)
+Total impact = annual cost + error cost
+\\\`\\\`\\\`
+
+### 4. Automation Feasibility
+
+| Criteria | Score (1-5) | Weight |
+|----------|------------|--------|
+| Repetitiveness | | 25% |
+| Rule-based (no judgment) | | 25% |
+| Data availability | | 20% |
+| Tool API support | | 15% |
+| ROI potential | | 15% |
+
+Score >= 3.5: Strong automation candidate
+Score 2.5-3.4: Partial automation possible
+Score < 2.5: Keep manual (for now)
+
+### 5. Recommendations
+For each opportunity:
+- Current state (how it works now)
+- Proposed state (how it should work)
+- Implementation effort (S/M/L)
+- Expected benefit (time saved, errors reduced, cost saved)
+- Priority (quick win / strategic / long-term)
+
+## Workflow
+1. Inventory all recurring processes
+2. Observe and time each process
+3. Identify inefficiencies using the framework
+4. Quantify impact in hours and dollars
+5. Score automation feasibility
+6. Prioritize by ROI and effort
+7. Present recommendations with business case
+
+## Output
+Save to \\\`./audits/process-audit-{date}.md\\\``,
+      },
+      {
+        name: "travel-coordinator",
+        description: "Organize travel logistics — itineraries, booking checklists, expense pre-approval, and packing lists.",
+        emoji: "\u2708\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/calcom/cal.com",
+        instructions: `# Travel Coordinator
+
+Organize business travel logistics with structured itineraries and checklists.
+
+## When to Use
+- Planning business trips (conferences, client visits, team offsites)
+- Creating travel itineraries for team members
+- Managing travel budgets and pre-approvals
+- Post-trip expense processing
+
+## Travel Planning Checklist
+
+### Pre-Trip (2+ weeks before)
+- [ ] Confirm travel dates and purpose
+- [ ] Get budget pre-approval (if required)
+- [ ] Book flights (check company travel policy for class/price limits)
+- [ ] Book hotel (within per-diem rate)
+- [ ] Arrange ground transportation (airport transfers, rental car)
+- [ ] Register for conference/event (if applicable)
+- [ ] Send calendar invites for all meetings at destination
+- [ ] Check visa/passport requirements (international travel)
+- [ ] Notify team of absence dates
+
+### Travel Day
+- [ ] Confirm all bookings (flights, hotel, car)
+- [ ] Download offline maps and boarding passes
+- [ ] Charge devices, pack chargers
+- [ ] Set out-of-office auto-replies
+- [ ] Share itinerary with emergency contact
+
+### Post-Trip
+- [ ] Submit expense report within 5 business days
+- [ ] Attach all receipts
+- [ ] Write trip summary (key meetings, outcomes, follow-ups)
+- [ ] Send follow-up emails to people met
+- [ ] Update CRM/pipeline with any new contacts
+
+## Itinerary Template
+
+| Date | Time | Activity | Location | Notes |
+|------|------|----------|----------|-------|
+| Mon | 06:00 | Depart [Home] | Airport | Flight #XX123 |
+| Mon | 10:00 | Arrive [Destination] | Airport | Transfer to hotel |
+| Mon | 12:00 | Lunch with [Client] | [Restaurant] | Reservation under [Name] |
+| Mon | 14:00 | Meeting: [Topic] | [Address] | Prep: [Notes] |
+| Tue | 09:00 | Conference Day 1 | [Venue] | Badge pickup at registration |
+
+## Budget Template
+
+| Category | Estimated | Actual | Limit |
+|----------|----------|--------|-------|
+| Flights | | | Per policy |
+| Hotel (X nights) | | | $X/night max |
+| Meals | | | $X/day per diem |
+| Ground transport | | | Reasonable |
+| Conference/event | | | Pre-approved |
+| **Total** | | | |
+
+## Output
+Save to \\\`./travel/{trip-name}/itinerary.md\\\` and \\\`./travel/{trip-name}/budget.md\\\``,
       },
     ],
     heartbeat: `# HEARTBEAT.md — Ops Automator
@@ -4295,6 +8154,926 @@ Categorize, prioritize, and draft responses for incoming emails.
 - Keep draft responses concise and professional
 - Flag anything ambiguous for human judgment`,
       },
+      {
+        name: "pitch-deck-builder",
+        description: "Create structured pitch deck outlines with investor-ready slides, talking points, and appendix materials.",
+        emoji: "\uD83C\uDFAC",
+        source: "GitHub",
+        sourceUrl: "https://github.com/joelparkerhenderson/pitch-deck",
+        instructions: `# Pitch Deck Builder
+
+Create structured pitch deck outlines that tell a compelling fundraising story.
+
+## When to Use
+- Preparing for investor meetings
+- Applying to accelerators
+- Creating partnership proposals
+- Internal strategy presentations
+
+## Standard Pitch Deck Structure (12 Slides)
+
+### 1. Title Slide
+- Company name and logo
+- One-line description (what you do)
+- Founder name(s) and contact
+
+### 2. Problem
+- Describe the pain point (make it visceral)
+- Quantify the problem (how many people, how much money wasted)
+- Current solutions and why they're inadequate
+
+### 3. Solution
+- Your product in one sentence
+- How it solves the problem differently
+- "Before vs. After" comparison
+
+### 4. Demo / Product
+- 2-3 screenshots or product visuals
+- Key user flow
+- "Magic moment" — what makes users love it
+
+### 5. Market Size
+- TAM / SAM / SOM with methodology
+- Market growth rate
+- Why now (timing thesis)
+
+### 6. Business Model
+- How you make money (pricing, unit economics)
+- Revenue model: subscription, transactional, marketplace
+- Target ACV (annual contract value) and payback period
+
+### 7. Traction
+- Key metrics: revenue, users, growth rate
+- Customer logos
+- MoM or QoQ growth chart
+
+### 8. Competition
+- 2x2 matrix positioning (not a feature checklist)
+- Your unique positioning
+- Defensibility / moat
+
+### 9. Go-to-Market
+- How you acquire customers (channels, playbooks)
+- CAC and LTV
+- Sales motion: self-serve, sales-led, PLG
+
+### 10. Team
+- Founders with relevant experience
+- Key hires and advisors
+- Why this team for this problem
+
+### 11. Financials
+- Revenue projections (3 years)
+- Path to profitability
+- Key assumptions
+
+### 12. The Ask
+- How much you're raising
+- What you'll spend it on (hiring, product, growth)
+- Target milestones the funding will achieve
+- Timeline
+
+## Talking Points
+For each slide, prepare:
+- 60-second explanation (for the actual pitch)
+- 2-minute deep dive (for Q&A)
+- One-line summary (for email follow-up)
+
+## Workflow
+1. Gather company information (product, metrics, team, financials)
+2. Structure the narrative arc (problem -> solution -> proof -> ask)
+3. Write content for each slide
+4. Add talking points and anticipated questions
+5. Create appendix slides (detailed financials, technical architecture, customer case studies)
+
+## Output
+Save to \\\`./pitch/{round}/pitch-deck-outline.md\\\``,
+      },
+      {
+        name: "financial-model",
+        description: "Build startup financial models with revenue projections, burn rate, unit economics, and runway calculations.",
+        emoji: "\uD83D\uDCB0",
+        source: "GitHub",
+        sourceUrl: "https://github.com/KrishMunot/awesome-startup",
+        instructions: `# Financial Model
+
+Build financial models for startups with revenue projections, expenses, and unit economics.
+
+## When to Use
+- Fundraising (investors expect financial projections)
+- Planning hiring and spending decisions
+- Understanding runway and burn rate
+- Evaluating pricing changes
+
+## Model Components
+
+### Revenue Model
+
+| Model Type | Formula | Best For |
+|-----------|---------|----------|
+| SaaS/Subscription | MRR = Customers x ARPU | Recurring revenue |
+| Transactional | Revenue = Transactions x AOV | Marketplaces, e-commerce |
+| Usage-based | Revenue = Units consumed x Price/unit | API, cloud, metered |
+
+### SaaS Revenue Projection
+\\\`\\\`\\\`
+Month N Revenue = (Previous customers - Churned + New) x ARPU
+MRR = Active customers x Average revenue per customer
+ARR = MRR x 12
+Net Revenue Retention = (Starting MRR + Expansion - Contraction - Churn) / Starting MRR
+\\\`\\\`\\\`
+
+### Unit Economics
+
+| Metric | Formula | Target |
+|--------|---------|--------|
+| CAC | Total sales & marketing / New customers | Varies by ACV |
+| LTV | ARPU x Gross margin % x (1/Churn rate) | 3x+ CAC |
+| LTV:CAC Ratio | LTV / CAC | >3:1 |
+| CAC Payback | CAC / (ARPU x Gross margin) | <12 months |
+| Gross Margin | (Revenue - COGS) / Revenue | >70% for SaaS |
+
+### Expense Categories
+- **People**: Salaries, benefits, contractors
+- **Infrastructure**: Hosting, tools, software
+- **Sales & Marketing**: Ads, content, events, sales tools
+- **G&A**: Legal, accounting, office, insurance
+- **R&D**: Product development costs
+
+### Runway Calculation
+\\\`\\\`\\\`
+Monthly Burn = Total monthly expenses - Monthly revenue
+Runway (months) = Cash in bank / Monthly burn
+Zero Cash Date = Today + Runway months
+\\\`\\\`\\\`
+
+## Financial Projection Template
+
+| Metric | M1 | M2 | M3 | ... | M12 |
+|--------|-----|-----|-----|-----|------|
+| New customers | | | | | |
+| Churned customers | | | | | |
+| Total customers | | | | | |
+| MRR | | | | | |
+| Total revenue | | | | | |
+| Total expenses | | | | | |
+| Net burn | | | | | |
+| Cash balance | | | | | |
+
+## Workflow
+1. Define revenue model and pricing
+2. Set growth assumptions (monthly customer growth, churn rate)
+3. Project revenue for 12-36 months
+4. Model expenses by category
+5. Calculate unit economics
+6. Determine runway and funding needs
+7. Create scenarios (conservative, base, aggressive)
+
+## Output
+Save to \\\`./finance/model-{date}.md\\\` with assumptions documented`,
+      },
+      {
+        name: "okr-planner",
+        description: "Set and track OKRs — define objectives, measurable key results, and quarterly check-in frameworks.",
+        emoji: "\uD83C\uDFAF",
+        source: "GitHub",
+        sourceUrl: "https://github.com/domenicosolazzo/awesome-okr",
+        instructions: `# OKR Planner
+
+Set, track, and review Objectives and Key Results for the company and teams.
+
+## When to Use
+- Quarterly OKR planning sessions
+- Weekly/monthly OKR check-ins
+- Annual goal-setting
+- Aligning team goals with company strategy
+
+## OKR Framework
+
+### What Makes a Good Objective
+- **Qualitative**: Describes what you want to achieve (not a number)
+- **Aspirational**: Ambitious but achievable (aim for 70% completion)
+- **Time-bound**: Tied to a quarter
+- **Inspiring**: Makes the team want to work on it
+
+Good: "Become the go-to solution for mid-market SaaS companies"
+Bad: "Increase revenue by 50%"
+
+### What Makes a Good Key Result
+- **Quantitative**: Has a specific number
+- **Measurable**: You can track progress objectively
+- **Outcome-based**: Measures results, not activities
+- **Challenging**: 70% completion = success
+
+Good: "Increase net revenue retention from 95% to 110%"
+Bad: "Launch 5 features" (that's an activity, not an outcome)
+
+## OKR Template
+
+### Company OKR (1 Quarter)
+\\\`\\\`\\\`
+Objective: [Aspirational, qualitative goal]
+
+KR1: [Metric] from [current] to [target]
+  Current: [value] | Target: [value] | Status: On track / At risk / Behind
+
+KR2: [Metric] from [current] to [target]
+  Current: [value] | Target: [value] | Status: On track / At risk / Behind
+
+KR3: [Metric] from [current] to [target]
+  Current: [value] | Target: [value] | Status: On track / At risk / Behind
+\\\`\\\`\\\`
+
+### Scoring (End of Quarter)
+- 0.0-0.3: Failed to make progress
+- 0.4-0.6: Made progress but fell short
+- 0.7-1.0: Delivered (0.7 = success for stretch goals)
+
+## Common OKR Patterns for Startups
+
+### Growth OKR
+- Objective: Accelerate product-led growth
+- KR1: MAU from 1,000 to 5,000
+- KR2: Activation rate from 20% to 40%
+- KR3: Organic signups from 30% to 50% of total
+
+### Revenue OKR
+- Objective: Build a repeatable sales engine
+- KR1: MRR from $10K to $50K
+- KR2: Close 20 new customers
+- KR3: Reduce CAC payback from 18 to 12 months
+
+### Product OKR
+- Objective: Deliver a product users can't live without
+- KR1: NPS from 30 to 50
+- KR2: DAU/MAU ratio from 15% to 30%
+- KR3: Feature adoption for [feature] from 10% to 40%
+
+## Check-In Cadence
+- **Weekly**: Quick status update on each KR (1 min per KR)
+- **Monthly**: Deep review — adjust tactics, not KRs
+- **End of quarter**: Score, retrospect, plan next quarter
+
+## Workflow
+1. Set 1-3 company objectives for the quarter
+2. Define 2-4 key results per objective
+3. Cascade to team/individual OKRs (alignment, not top-down mandate)
+4. Set up weekly tracking
+5. Monthly deep review
+6. End-of-quarter scoring and retrospective
+
+## Output
+Save to \\\`./okrs/{year}-q{quarter}.md\\\``,
+      },
+      {
+        name: "investor-update",
+        description: "Draft monthly investor updates with metrics, wins, challenges, asks, and burn rate transparency.",
+        emoji: "\uD83D\uDCE8",
+        source: "GitHub",
+        sourceUrl: "https://github.com/pankajshrestha/tech-and-venture-capital-toolkit",
+        instructions: `# Investor Update
+
+Draft clear, concise monthly investor updates that build trust and maintain support.
+
+## When to Use
+- Monthly investor updates (should be sent consistently!)
+- Post-milestone updates (funding close, major launch, key hire)
+- Quarterly board prep materials
+- Annual review summaries
+
+## Investor Update Template
+
+### Subject Line
+"[Company Name] — [Month Year] Update: [One Key Highlight]"
+
+### The Update (Keep Under 500 Words)
+
+**TL;DR** (3 bullets max)
+- Biggest win this month
+- Most important metric change
+- Biggest challenge or ask
+
+**Key Metrics Table**
+
+| Metric | This Month | Last Month | MoM Change |
+|--------|-----------|-----------|------------|
+| MRR | $X | $X | +X% |
+| Customers | X | X | +X |
+| Churn | X% | X% | Flat |
+| Burn | $X | $X | Flat |
+| Runway | X months | X months | |
+| Cash | $X | $X | |
+
+**Wins**
+- 2-3 biggest accomplishments (be specific with metrics)
+
+**Challenges**
+- 1-2 honest challenges (investors respect transparency)
+- What you're doing about each one
+
+**Product**
+- Key features shipped or in progress
+- Customer feedback highlights
+
+**Team**
+- New hires, departures, open roles
+
+**Asks**
+- Specific, actionable requests (intros, advice, resources)
+- Make it easy: "Looking for intro to [type of person] at [type of company]"
+
+**Upcoming**
+- What you're focused on next month
+
+### Formatting Guidelines
+- Keep it scannable (bullets, not paragraphs)
+- Lead with metrics (investors are data-driven)
+- Be honest about challenges (never hide bad news)
+- Make asks specific (not "any intros would help")
+- Send consistently on the same day each month
+- Include a chart for your most important metric trend
+
+## Consistency Tips
+- Set a calendar reminder for the 1st of each month
+- Keep a running doc throughout the month to capture updates
+- Template the metrics section to auto-populate
+- Reply to the same email thread (investors can scroll back for history)
+
+## Workflow
+1. Pull key metrics for the month
+2. List top wins and challenges
+3. Write the update using the template
+4. Add specific asks
+5. Review for tone (confident but honest)
+6. Send on schedule
+
+## Output
+Save to \\\`./investors/updates/{year}-{month}.md\\\``,
+      },
+      {
+        name: "competitive-landscape",
+        description: "Map the competitive landscape with positioning matrices, feature comparisons, and strategic differentiation.",
+        emoji: "\uD83D\uDDFA\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/0xmetaschool/competitor-analyst",
+        requires: { bins: ["curl"] },
+        instructions: `# Competitive Landscape
+
+Map and analyze the competitive landscape to inform product and GTM strategy.
+
+## When to Use
+- Fundraising (investors always ask about competition)
+- Product strategy planning
+- Entering a new market
+- Quarterly competitive review
+
+## Competitive Analysis Framework
+
+### Direct Competitors
+Companies solving the same problem for the same customer:
+- Product feature comparison
+- Pricing comparison
+- Target market overlap
+- Positioning differences
+
+### Indirect Competitors
+Alternative solutions customers might use instead:
+- Spreadsheets, manual processes
+- Adjacent tools that partially solve the problem
+- In-house/custom-built solutions
+- Status quo (doing nothing)
+
+### Emerging Competitors
+Early-stage companies entering your space:
+- Recent funding announcements
+- Product Hunt launches
+- New entrants from adjacent markets
+
+## Positioning Matrix (2x2)
+
+Choose two dimensions that matter to your buyers:
+
+| Dimension | Examples |
+|-----------|---------|
+| Simplicity vs. Power | Easy to use vs. feature-rich |
+| Price | Affordable vs. premium |
+| Market focus | SMB vs. enterprise |
+| Approach | PLG vs. sales-led |
+| Specialization | Horizontal vs. vertical |
+
+Place yourself and competitors on the matrix. Your goal: own a quadrant.
+
+## Feature Comparison Table
+
+| Feature | Us | Competitor A | Competitor B |
+|---------|-----|-------------|-------------|
+| Feature 1 | Full | Partial | No |
+| Feature 2 | Full | Full | Partial |
+| Pricing | $X/mo | $Y/mo | $Z/mo |
+| Free tier | Yes | No | Limited |
+
+## Competitor Monitoring
+Track monthly:
+- Website changes (pricing, positioning, features)
+- Job postings (reveal priorities and growth areas)
+- Content/blog topics (thought leadership direction)
+- Social media activity
+- Customer reviews (G2, Capterra)
+- Press releases and funding
+
+## Workflow
+1. Identify all direct, indirect, and emerging competitors
+2. Research each competitor (website, reviews, pricing, team)
+3. Build feature comparison matrix
+4. Create 2x2 positioning map
+5. Identify your unique advantages and vulnerabilities
+6. Document competitive positioning for the team
+
+## Output
+Save to \\\`./research/competitive-landscape.md\\\``,
+      },
+      {
+        name: "user-interview-guide",
+        description: "Design user interview scripts with structured questions, probes, and analysis frameworks for customer discovery.",
+        emoji: "\uD83C\uDF99\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/KrishMunot/awesome-startup",
+        instructions: `# User Interview Guide
+
+Design and conduct structured user interviews for customer discovery and product insights.
+
+## When to Use
+- Validating a new product idea
+- Understanding customer pain points
+- Pre-development customer discovery
+- Post-launch feedback gathering
+- Churn analysis interviews
+
+## Interview Structure
+
+### 1. Warm-Up (2 minutes)
+- Thank them for their time
+- Explain the purpose (learning, not selling)
+- Set expectations (duration, recording permission)
+- "There are no right or wrong answers"
+
+### 2. Context Questions (5 minutes)
+- "Tell me about your role and what a typical day looks like"
+- "How long have you been doing [relevant activity]?"
+- "What tools do you currently use for [problem space]?"
+
+### 3. Problem Exploration (10 minutes)
+- "Walk me through the last time you [experienced the problem]"
+- "What was the hardest part about that?"
+- "How often does this come up?"
+- "What have you tried to solve this?"
+- "What happened when you tried that?"
+
+### 4. Impact Questions (5 minutes)
+- "What does this problem cost you?" (time, money, stress)
+- "If you could wave a magic wand, what would change?"
+- "How important is solving this compared to other priorities?"
+
+### 5. Solution Exploration (5 minutes)
+- "If I told you there was a tool that [your value prop], how would you react?"
+- "What would need to be true for you to switch from your current approach?"
+- "What would make you hesitant to try something new here?"
+
+### 6. Wrap-Up (3 minutes)
+- "Is there anything I should have asked but didn't?"
+- "Who else should I talk to about this?"
+- Ask for permission to follow up
+
+## Interview Do's and Don'ts
+
+### Do
+- Ask open-ended questions (what, how, tell me about)
+- Follow up on emotions ("you mentioned that was frustrating — tell me more")
+- Listen more than you talk (80/20 rule)
+- Take notes on exact quotes
+- Ask about past behavior, not hypothetical futures
+
+### Don't
+- Ask leading questions ("Don't you think X would be great?")
+- Pitch your product during the interview
+- Ask yes/no questions
+- Ask "Would you use this?" (people lie about future behavior)
+- Interrupt — let awkward silences happen (they lead to insights)
+
+## Analysis Framework
+After 5+ interviews, look for:
+- **Patterns**: Same problem mentioned by 3+ people
+- **Intensity**: Problems described with emotion/frustration
+- **Frequency**: How often the problem occurs
+- **Current spend**: Money/time already being spent on solutions
+- **Willingness**: Expressed desire to try something new
+
+## Output
+Save notes to \\\`./research/interviews/{name}-{date}.md\\\`
+Save synthesis to \\\`./research/interview-synthesis.md\\\``,
+      },
+      {
+        name: "hiring-plan",
+        description: "Create structured hiring plans with role definitions, job descriptions, interview scorecards, and timeline.",
+        emoji: "\uD83D\uDC65",
+        source: "GitHub",
+        sourceUrl: "https://github.com/KrishMunot/awesome-startup",
+        instructions: `# Hiring Plan
+
+Create structured hiring plans with role definitions, job descriptions, and interview frameworks.
+
+## When to Use
+- Planning headcount for next quarter/year
+- Opening a new role
+- Building interview processes
+- Scaling the team post-funding
+
+## Hiring Plan Template
+
+### Headcount Plan
+
+| Role | Department | Start Date | Priority | Salary Range | Status |
+|------|-----------|-----------|----------|-------------|--------|
+| Senior Engineer | Engineering | Q1 | P1 | $X-$Y | Open |
+| SDR | Sales | Q2 | P2 | $X-$Y | Planning |
+
+### Role Definition
+For each role, define:
+- **Why this role**: What problem does this hire solve?
+- **Title and level**: Seniority, reporting structure
+- **Core responsibilities**: Top 3-5 things they'll do daily
+- **Must-haves**: Non-negotiable requirements
+- **Nice-to-haves**: Bonus qualifications
+- **Success metrics**: How we'll know they're performing at 30/60/90 days
+
+## Job Description Template
+
+### Title
+[Role Title] at [Company Name]
+
+### About Us (3-4 sentences)
+What the company does, mission, stage, team size, culture
+
+### The Role
+What they'll do (outcomes, not tasks)
+
+### What You'll Work On
+- Responsibility 1 (with impact: "own X, which drives Y")
+- Responsibility 2
+- Responsibility 3
+
+### You Might Be a Fit If
+- Experience or skill 1
+- Experience or skill 2
+- Characteristic or mindset
+
+### What We Offer
+- Compensation range
+- Benefits highlights
+- Growth opportunity
+- Culture or work style (remote, flexible, etc.)
+
+## Interview Scorecard
+For each interview, score:
+
+| Criteria | Score (1-5) | Notes |
+|----------|------------|-------|
+| Technical skills | | |
+| Problem-solving | | |
+| Communication | | |
+| Culture add | | |
+| Motivation/drive | | |
+| Role-specific criteria | | |
+
+### Score Interpretation
+- 4.5+: Strong hire
+- 3.5-4.4: Hire (with some development areas)
+- 2.5-3.4: Borderline — need more signal
+- <2.5: No hire
+
+## Workflow
+1. Define the role and why it's needed now
+2. Write the job description
+3. Design the interview process (stages, interviewers, scorecards)
+4. Set timeline and milestones
+5. Source candidates (job boards, referrals, recruiters)
+6. Track pipeline
+
+## Output
+Save to \\\`./hiring/{role-name}/plan.md\\\` and \\\`./hiring/{role-name}/jd.md\\\``,
+      },
+      {
+        name: "product-roadmap",
+        description: "Build and prioritize product roadmaps with feature scoring, timeline planning, and stakeholder communication.",
+        emoji: "\uD83D\uDDFA\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/makeplane/plane",
+        instructions: `# Product Roadmap
+
+Build prioritized product roadmaps that balance customer needs, business goals, and engineering effort.
+
+## When to Use
+- Quarterly product planning
+- Communicating product direction to stakeholders
+- Prioritizing feature requests
+- Investor or board presentations
+
+## Roadmap Framework
+
+### Feature Scoring (RICE)
+
+| Factor | Definition | Scale |
+|--------|-----------|-------|
+| **R**each | How many users will this impact per quarter? | Number of users |
+| **I**mpact | How much will it impact each user? | 3=massive, 2=high, 1=medium, 0.5=low |
+| **C**onfidence | How sure are we about reach and impact? | 100%=high, 80%=medium, 50%=low |
+| **E**ffort | How many person-months of work? | Number (lower = better) |
+
+**RICE Score** = (Reach x Impact x Confidence) / Effort
+
+### Alternative: ICE Scoring
+
+| Factor | Scale (1-10) |
+|--------|-------------|
+| **I**mpact | Business impact potential |
+| **C**onfidence | Certainty of success |
+| **E**ase | Ease of implementation |
+
+**ICE Score** = Impact x Confidence x Ease
+
+### Roadmap Horizons
+
+| Horizon | Timeframe | Certainty | Detail Level |
+|---------|----------|-----------|-------------|
+| Now | This month/sprint | High | Specific stories/tasks |
+| Next | Next 1-3 months | Medium | Features with scope |
+| Later | 3-12 months | Low | Themes and initiatives |
+
+## Feature Request Tracking
+
+| Feature | Source | Frequency | RICE Score | Status |
+|---------|--------|-----------|-----------|--------|
+| [Feature name] | Customer/Internal | # of requests | Score | Now/Next/Later/Won't do |
+
+## Communicating the Roadmap
+- **For engineering**: Detailed specs, acceptance criteria, dependencies
+- **For sales**: Feature names, value props, expected dates (ranges, not promises)
+- **For investors**: Themes and strategic direction (why, not what)
+- **For customers**: High-level themes with rough timing (quarters, not dates)
+
+## Workflow
+1. Gather inputs (customer requests, internal ideas, competitive gaps, bugs)
+2. Score each feature using RICE or ICE
+3. Group into themes/initiatives
+4. Assign to horizons (Now/Next/Later)
+5. Validate with engineering (effort estimates)
+6. Communicate to stakeholders
+
+## Output
+Save to \\\`./product/roadmap-{quarter}.md\\\``,
+      },
+      {
+        name: "business-model-canvas",
+        description: "Create and iterate on Business Model Canvas with all 9 blocks: value prop, segments, channels, and more.",
+        emoji: "\uD83D\uDCCB",
+        source: "GitHub",
+        sourceUrl: "https://github.com/fibasile/QuickCanvas",
+        instructions: `# Business Model Canvas
+
+Create and iterate on the Business Model Canvas to design and evaluate business models.
+
+## When to Use
+- Starting a new venture or product line
+- Evaluating a pivot
+- Communicating business model to investors or advisors
+- Quarterly business model review
+
+## The 9 Blocks
+
+### 1. Customer Segments
+Who are you creating value for?
+- Mass market, niche, segmented, multi-sided platform
+- Define 1-3 primary segments with persona details
+- Which segment pays? Which segment benefits?
+
+### 2. Value Propositions
+What value do you deliver to each segment?
+- Which customer problems are you solving?
+- What bundles of products/services do you offer?
+- Categories: newness, performance, customization, getting the job done, design, brand, price, cost reduction, risk reduction, accessibility, convenience
+
+### 3. Channels
+How do you reach and communicate with customers?
+- Awareness: How do they discover you?
+- Evaluation: How do they evaluate your value prop?
+- Purchase: How do they buy?
+- Delivery: How do you deliver?
+- After-sales: How do you support them?
+
+### 4. Customer Relationships
+What type of relationship does each segment expect?
+- Self-service, automated, community, personal assistance, co-creation, dedicated support
+
+### 5. Revenue Streams
+How does each segment pay?
+- Subscription, transaction, licensing, advertising, freemium, usage-based
+- Pricing: fixed list, bargaining, auction, market-dependent, volume-dependent
+
+### 6. Key Resources
+What assets are required to make the model work?
+- Physical, intellectual (IP, patents, data), human, financial
+
+### 7. Key Activities
+What are the most important things you do?
+- Production, problem-solving, platform management, sales, marketing
+
+### 8. Key Partnerships
+Who are your key partners and suppliers?
+- Strategic alliances, co-opetition, joint ventures, buyer-supplier
+- What activities do partners perform? What resources do they provide?
+
+### 9. Cost Structure
+What are the most important costs?
+- Fixed vs. variable
+- Economies of scale vs. scope
+- Cost-driven vs. value-driven
+
+## Workflow
+1. Fill out each block with current assumptions
+2. Identify the riskiest assumptions (highlight in red)
+3. Design experiments to test risky assumptions
+4. Update the canvas based on learnings
+5. Review and iterate quarterly
+
+## Output
+Save to \\\`./strategy/business-model-canvas.md\\\``,
+      },
+      {
+        name: "launch-checklist",
+        description: "Create comprehensive product launch checklists with pre-launch, launch day, and post-launch tasks.",
+        emoji: "\uD83D\uDE80",
+        source: "GitHub",
+        sourceUrl: "https://github.com/KrishMunot/awesome-startup",
+        instructions: `# Launch Checklist
+
+Create comprehensive checklists for product and feature launches.
+
+## When to Use
+- Launching a new product or major feature
+- Launching a new pricing plan or tier
+- Re-launching or re-positioning an existing product
+- Planning a Product Hunt or public launch
+
+## Pre-Launch (2-4 Weeks Before)
+
+### Product
+- [ ] Feature complete and QA passed
+- [ ] Performance testing done
+- [ ] Security review completed
+- [ ] Monitoring and alerts configured
+- [ ] Rollback plan documented
+- [ ] Feature flags set (if gradual rollout)
+
+### Marketing
+- [ ] Landing page live and tested
+- [ ] Blog post / announcement written
+- [ ] Email announcement drafted and scheduled
+- [ ] Social media posts scheduled
+- [ ] Press outreach (if applicable)
+- [ ] Product Hunt submission prepared (if applicable)
+- [ ] Demo video or GIF created
+
+### Sales
+- [ ] Sales team briefed on new feature/product
+- [ ] Pricing finalized and configured
+- [ ] FAQ document prepared for common questions
+- [ ] Competitive positioning updated
+- [ ] Case study or beta customer quote ready
+
+### Support
+- [ ] Knowledge base articles written
+- [ ] Support team trained on new feature
+- [ ] Canned responses prepared for common issues
+- [ ] Escalation path defined for new feature issues
+
+## Launch Day
+
+- [ ] Deploy to production (or enable feature flag)
+- [ ] Verify deployment (smoke tests)
+- [ ] Publish blog post
+- [ ] Send email announcement
+- [ ] Post on social media
+- [ ] Submit to Product Hunt (if applicable)
+- [ ] Notify team (Slack channel)
+- [ ] Monitor metrics and error rates closely
+- [ ] Respond to early feedback quickly
+
+## Post-Launch (1-2 Weeks After)
+
+- [ ] Analyze launch metrics (signups, activations, feedback)
+- [ ] Respond to all customer feedback
+- [ ] Fix any bugs reported
+- [ ] Update docs based on common questions
+- [ ] Write launch retrospective
+- [ ] Plan follow-up content
+- [ ] Send thank you to beta customers
+- [ ] Update competitive positioning
+
+## Launch Metrics to Track
+
+| Metric | Target | Actual |
+|--------|--------|--------|
+| Page views (launch day) | | |
+| Signups | | |
+| Activations | | |
+| Social shares | | |
+| Press mentions | | |
+| Support tickets | | |
+| Error rate | | |
+| Customer feedback (positive/negative) | | |
+
+## Workflow
+1. Set launch date and create the checklist
+2. Assign owners to each task
+3. Weekly check-ins to track progress
+4. Dry run 2 days before launch
+5. Execute launch day plan
+6. Monitor and iterate post-launch
+
+## Output
+Save to \\\`./launches/{product-name}/checklist.md\\\``,
+      },
+      {
+        name: "pricing-strategy",
+        description: "Design and evaluate pricing strategies with willingness-to-pay analysis, tier design, and competitive benchmarking.",
+        emoji: "\uD83C\uDFF7\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/KrishMunot/awesome-startup",
+        instructions: `# Pricing Strategy
+
+Design pricing models that capture value and drive growth.
+
+## When to Use
+- Setting initial pricing for a new product
+- Evaluating a pricing change
+- Introducing new tiers or plans
+- Responding to competitive pricing moves
+
+## Pricing Models
+
+| Model | Best For | Pros | Cons |
+|-------|---------|------|------|
+| Flat rate | Simple products | Easy to understand | Leaves money on table |
+| Per-seat | Team tools | Predictable, scales with usage | Discourages adoption |
+| Usage-based | APIs, infrastructure | Aligns with value | Unpredictable revenue |
+| Tiered | SaaS with segments | Serves multiple segments | Complex to manage |
+| Freemium | PLG products | Low friction adoption | Free users cost money |
+
+## Tier Design Framework
+
+### Three-Tier Pattern
+
+| | Starter | Pro | Enterprise |
+|---|---------|-----|-----------|
+| Target | Small teams | Growing companies | Large orgs |
+| Price | Free or low | Mid-range | Custom |
+| Features | Core only | Core + advanced | All + premium |
+| Support | Self-serve | Email + chat | Dedicated |
+| Limits | Restricted | Generous | Unlimited |
+
+### Tier Design Rules
+- Each tier should have a clear "hero feature" that justifies the upgrade
+- The middle tier should be the most popular (anchor pricing)
+- Name tiers by persona, not by features
+- Include a free tier only if you have a PLG motion
+
+## Value-Based Pricing Approach
+1. **Understand the value**: What's the ROI your product delivers?
+2. **Quantify it**: Hours saved x hourly rate, revenue generated, costs avoided
+3. **Price at 10-20% of value**: Customer keeps 80%+ of the value
+4. **Validate**: Test with customers (Van Westendorp, conjoint analysis)
+
+## Competitive Pricing Analysis
+
+| Dimension | Us | Comp A | Comp B |
+|-----------|-----|--------|--------|
+| Starting price | | | |
+| Per-seat cost | | | |
+| Enterprise pricing | | | |
+| Free tier | | | |
+| Annual discount | | | |
+
+## Pricing Change Checklist
+- [ ] Model impact on existing customers (grandfathering?)
+- [ ] Communicate value before price (what's new?)
+- [ ] Give advance notice (30+ days)
+- [ ] Offer annual lock-in option
+- [ ] Prepare support for questions
+- [ ] Monitor churn for 90 days post-change
+
+## Output
+Save to \\\`./strategy/pricing-{date}.md\\\``,
+      },
     ],
     heartbeat: `# HEARTBEAT.md — Founder Sidekick
 
@@ -4425,6 +9204,907 @@ Generate formatted, readable tables as PNG images.
 ## Output
 Save to \`./tables/{name}.png\`
 Also save the underlying data as \`./tables/{name}.csv\` for reproducibility.`,
+      },
+      {
+        name: "sql-generator",
+        description: "Generate SQL queries from natural language — SELECT, JOIN, GROUP BY, window functions, and CTEs.",
+        emoji: "\uD83D\uDDC3\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/whoiskatrin/sql-translator",
+        instructions: `# SQL Generator
+
+Generate SQL queries from natural language descriptions.
+
+## When to Use
+- Querying databases for analysis
+- Building reports from database tables
+- Exploring data schemas
+- Creating data pipelines with SQL transformations
+
+## SQL Patterns
+
+### Basic Queries
+\\\`\\\`\\\`sql
+-- Filter and sort
+SELECT column1, column2 FROM table WHERE condition ORDER BY column1 DESC LIMIT 100;
+
+-- Aggregate
+SELECT category, COUNT(*), AVG(value), SUM(amount)
+FROM table GROUP BY category HAVING COUNT(*) > 10;
+
+-- Date filtering
+SELECT * FROM orders WHERE created_at >= '2026-01-01' AND created_at < '2026-02-01';
+\\\`\\\`\\\`
+
+### JOINs
+\\\`\\\`\\\`sql
+-- Inner join (matching rows only)
+SELECT u.name, o.total FROM users u INNER JOIN orders o ON u.id = o.user_id;
+
+-- Left join (all left rows, matching right)
+SELECT u.name, COUNT(o.id) as order_count
+FROM users u LEFT JOIN orders o ON u.id = o.user_id
+GROUP BY u.name;
+\\\`\\\`\\\`
+
+### Window Functions
+\\\`\\\`\\\`sql
+-- Ranking
+SELECT name, revenue, RANK() OVER (ORDER BY revenue DESC) as rank FROM sales;
+
+-- Running totals
+SELECT date, revenue, SUM(revenue) OVER (ORDER BY date) as cumulative FROM daily_revenue;
+
+-- Period comparison
+SELECT date, revenue,
+  LAG(revenue, 1) OVER (ORDER BY date) as prev_day,
+  revenue - LAG(revenue, 1) OVER (ORDER BY date) as change
+FROM daily_revenue;
+\\\`\\\`\\\`
+
+### CTEs (Common Table Expressions)
+\\\`\\\`\\\`sql
+WITH monthly_revenue AS (
+  SELECT DATE_TRUNC('month', created_at) as month, SUM(amount) as revenue
+  FROM orders GROUP BY 1
+)
+SELECT month, revenue,
+  LAG(revenue) OVER (ORDER BY month) as prev_month,
+  ROUND((revenue - LAG(revenue) OVER (ORDER BY month)) / LAG(revenue) OVER (ORDER BY month) * 100, 1) as growth_pct
+FROM monthly_revenue ORDER BY month;
+\\\`\\\`\\\`
+
+## Query Optimization Tips
+- Select only needed columns (not SELECT *)
+- Use WHERE to filter early
+- Add indexes for frequently queried columns
+- Use EXPLAIN ANALYZE to check execution plans
+- Avoid subqueries in WHERE — use JOINs or CTEs instead
+
+## Workflow
+1. Understand the question being asked
+2. Identify which tables and columns are needed
+3. Write the query step by step (filter, join, aggregate, sort)
+4. Test on a small subset first (add LIMIT)
+5. Check the results make sense (row counts, value ranges)
+6. Optimize if needed (execution plan, indexes)
+
+## Output
+Save queries to \\\`./queries/{name}.sql\\\` with comments explaining the logic`,
+      },
+      {
+        name: "data-cleaner",
+        description: "Clean messy datasets — handle missing values, fix types, remove duplicates, standardize formats.",
+        emoji: "\uD83E\uDDF9",
+        source: "GitHub",
+        sourceUrl: "https://github.com/VIDA-NYU/openclean",
+        requires: { anyBins: ["python3", "node"] },
+        instructions: `# Data Cleaner
+
+Clean and standardize messy datasets for reliable analysis.
+
+## When to Use
+- Raw data import from CSV, API, or spreadsheet
+- Data quality issues blocking analysis
+- Before merging datasets from different sources
+- Setting up automated data pipelines
+
+## Common Data Quality Issues
+
+| Issue | Detection | Fix |
+|-------|----------|-----|
+| Missing values | Count nulls per column | Drop, fill (mean/median/mode), flag |
+| Duplicates | Group by key columns, count | Deduplicate (keep latest or most complete) |
+| Wrong types | Check dtypes | Cast to correct type (string dates to datetime) |
+| Inconsistent formats | Unique value counts | Standardize (date formats, phone numbers, etc.) |
+| Outliers | Statistical tests, box plots | Investigate (real or error?), cap or remove |
+| Invalid values | Range checks, regex | Fix or flag for manual review |
+| Encoding issues | Check for mojibake | Re-read with correct encoding (UTF-8) |
+| Trailing whitespace | Strip and compare | Trim all string columns |
+
+## Cleaning Workflow
+
+### Step 1: Profile the Data
+- Row count and column count
+- Data types per column
+- Missing value count per column
+- Unique value count per column
+- Min/max/mean for numeric columns
+- Sample values for each column
+
+### Step 2: Handle Missing Values
+Decision tree:
+- **<5% missing**: Drop rows (if analysis allows)
+- **5-30% missing**: Fill with median (numeric) or mode (categorical)
+- **>30% missing**: Consider dropping the column
+- **Structural missingness**: Flag as a separate category
+
+### Step 3: Fix Data Types
+- Dates: Parse to datetime objects
+- Numbers stored as strings: Remove currency symbols, commas, parse
+- Booleans: Standardize (yes/no/true/false/1/0 -> true/false)
+- Categories: Convert to categorical type
+
+### Step 4: Standardize Formats
+- Dates: ISO 8601 (YYYY-MM-DD)
+- Phone numbers: E.164 format (+1XXXXXXXXXX)
+- Names: Title case, trim whitespace
+- Categories: Consistent casing, no typo variants
+- Currency: Numeric with separate currency column
+
+### Step 5: Remove Duplicates
+- Define what makes a row unique (key columns)
+- Check for exact vs. fuzzy duplicates
+- Keep the most recent or most complete record
+
+### Step 6: Validate
+- Row count before vs. after
+- No remaining nulls in required columns
+- All values in expected ranges
+- Key columns have expected cardinality
+
+## Output
+- Cleaned data: \\\`./data/{name}-clean.csv\\\`
+- Cleaning log: \\\`./data/{name}-cleaning-log.md\\\` (documenting every transformation)`,
+      },
+      {
+        name: "cohort-analysis",
+        description: "Run cohort analyses for retention, revenue, and behavior — group users by signup date and track over time.",
+        emoji: "\uD83D\uDC65",
+        source: "GitHub",
+        sourceUrl: "https://github.com/metabase/metabase",
+        instructions: `# Cohort Analysis
+
+Analyze user cohorts to understand retention, engagement, and revenue patterns over time.
+
+## When to Use
+- Measuring user retention after onboarding changes
+- Understanding revenue trends by customer vintage
+- Evaluating the impact of product changes
+- Reporting to investors on retention metrics
+
+## Cohort Types
+
+### Time-Based Cohorts
+Group users by when they signed up:
+- Weekly cohorts (for high-volume products)
+- Monthly cohorts (most common)
+- Quarterly cohorts (for low-volume or enterprise)
+
+### Behavior-Based Cohorts
+Group users by what they did:
+- Activated vs. not activated
+- Used feature X vs. didn't
+- Came from channel A vs. channel B
+- Free vs. paid from day 1
+
+## Retention Cohort Table
+
+| Cohort | Month 0 | Month 1 | Month 2 | Month 3 | Month 6 | Month 12 |
+|--------|---------|---------|---------|---------|---------|----------|
+| Jan 2026 | 100% | ?% | ?% | ?% | ?% | ?% |
+| Feb 2026 | 100% | ?% | ?% | ?% | ?% | |
+| Mar 2026 | 100% | ?% | ?% | ?% | | |
+
+**Reading the table**: Each row shows how a cohort's retention decays over time.
+
+## Key Metrics Per Cohort
+
+| Metric | Formula |
+|--------|---------|
+| Retention rate | Active users in period / Users at start |
+| Churn rate | 1 - Retention rate |
+| Revenue per cohort | Sum of revenue from cohort members in period |
+| LTV per cohort | Cumulative revenue / Initial cohort size |
+| Activation rate | Users who completed key action / Total signups |
+
+## Analysis Workflow
+1. Define the cohort grouping (time or behavior)
+2. Define the retention event (what counts as "active"?)
+3. Query the data: for each cohort, count active users per period
+4. Build the cohort table (rows = cohorts, columns = periods)
+5. Calculate retention percentages
+6. Visualize as a heatmap (darker = higher retention)
+7. Compare cohorts to find what improved or degraded retention
+
+## What to Look For
+- **Retention curve shape**: Does it flatten (good) or keep declining (bad)?
+- **Cohort improvement**: Are newer cohorts retaining better?
+- **Drop-off points**: Where is the biggest retention loss?
+- **Behavior correlation**: Do activated users retain 2-3x better?
+
+## Output
+- Cohort table: \\\`./reports/cohort-{type}-{date}.csv\\\`
+- Analysis: \\\`./reports/cohort-analysis-{date}.md\\\`
+- Heatmap chart: \\\`./charts/cohort-heatmap-{date}.png\\\``,
+      },
+      {
+        name: "funnel-analysis",
+        description: "Analyze conversion funnels — identify drop-off points, calculate stage conversion rates, and recommend optimizations.",
+        emoji: "\uD83D\uDCC9",
+        source: "GitHub",
+        sourceUrl: "https://github.com/metabase/metabase",
+        instructions: `# Funnel Analysis
+
+Analyze conversion funnels to find drop-off points and optimize conversion rates.
+
+## When to Use
+- Diagnosing why signups aren't converting to paid
+- Optimizing onboarding flows
+- Improving checkout or purchase funnels
+- Measuring the impact of UX changes
+
+## Common Funnel Types
+
+### SaaS Signup Funnel
+Visitor -> Signup -> Activation -> Paid Conversion -> Retained
+
+### E-Commerce Purchase Funnel
+Browse -> Product View -> Add to Cart -> Checkout Start -> Purchase
+
+### B2B Sales Funnel
+Lead -> MQL -> SQL -> Demo -> Proposal -> Closed Won
+
+## Funnel Analysis Template
+
+| Stage | Users | Conversion | Drop-off | Drop-off % |
+|-------|-------|-----------|----------|-----------|
+| Visit landing page | 10,000 | - | - | - |
+| Click CTA | 3,000 | 30.0% | 7,000 | 70.0% |
+| Start signup | 1,500 | 50.0% | 1,500 | 50.0% |
+| Complete signup | 1,000 | 66.7% | 500 | 33.3% |
+| Activate | 400 | 40.0% | 600 | 60.0% |
+| Convert to paid | 80 | 20.0% | 320 | 80.0% |
+
+**Overall conversion**: 80 / 10,000 = 0.8%
+
+## Drop-off Diagnosis
+
+### High Drop-Off at Sign-Up
+- Form too long (reduce fields)
+- Unclear value proposition
+- Social proof missing
+- Slow page load
+- Friction: requiring credit card upfront
+
+### High Drop-Off at Activation
+- Unclear first steps
+- Too many steps to value
+- Confusing UX
+- No onboarding guidance
+- Feature not delivering on promise
+
+### High Drop-Off at Conversion
+- Price too high (or unclear pricing)
+- Trial too short (or too long)
+- Value not demonstrated during trial
+- No urgency to convert
+
+## Segmented Funnel Analysis
+Break funnel by:
+- Traffic source (organic, paid, referral)
+- Device (mobile vs. desktop)
+- Geography
+- User persona / segment
+- Time period (week-over-week comparison)
+
+## Workflow
+1. Define the funnel stages (what events represent each step?)
+2. Query data for user counts at each stage
+3. Calculate conversion and drop-off rates per stage
+4. Identify the biggest drop-off points
+5. Segment the funnel to find differences across groups
+6. Hypothesize reasons for drop-offs
+7. Recommend A/B tests or changes
+
+## Output
+- Funnel report: \\\`./reports/funnel-{name}-{date}.md\\\`
+- Funnel chart: \\\`./charts/funnel-{name}-{date}.png\\\``,
+      },
+      {
+        name: "anomaly-detector",
+        description: "Detect anomalies in time-series data — sudden spikes, drops, trend breaks, and unusual patterns.",
+        emoji: "\u26A0\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/arundo/adtk",
+        requires: { anyBins: ["python3", "node"] },
+        instructions: `# Anomaly Detector
+
+Detect unusual patterns in time-series and business data.
+
+## When to Use
+- Monitoring business metrics for sudden changes
+- Investigating unexpected data patterns
+- Building alerts for KPI dashboards
+- Quality checking data pipelines
+
+## Anomaly Types
+
+| Type | Description | Example |
+|------|-----------|---------|
+| Spike | Sudden increase | Traffic 5x normal |
+| Drop | Sudden decrease | Revenue dropped 50% |
+| Trend break | Direction change | Growth rate turned negative |
+| Seasonality violation | Breaks expected pattern | Monday traffic lower than usual |
+| Outlier | Individual extreme value | One order for $1M (normal is $100) |
+| Drift | Gradual shift | Average order value slowly declining |
+
+## Detection Methods
+
+### Statistical Methods
+- **Z-score**: Flag values >2 standard deviations from mean
+- **IQR**: Flag values outside Q1-1.5*IQR or Q3+1.5*IQR
+- **Moving average**: Compare each point to rolling average
+- **Percent change**: Flag changes >X% from previous period
+
+### Simple Moving Average Detection
+\\\`\\\`\\\`
+For each data point:
+  moving_avg = average of last N points
+  moving_std = std deviation of last N points
+  if abs(current - moving_avg) > 2 * moving_std:
+    FLAG AS ANOMALY
+\\\`\\\`\\\`
+
+### Percentage Change Detection
+\\\`\\\`\\\`
+For each data point:
+  pct_change = (current - previous) / previous * 100
+  if abs(pct_change) > threshold:
+    FLAG AS ANOMALY
+\\\`\\\`\\\`
+
+## Alert Severity
+
+| Severity | Criteria | Response |
+|----------|---------|----------|
+| Critical | >3 std devs OR core metric (revenue, signups) | Investigate immediately |
+| Warning | 2-3 std devs OR secondary metric | Investigate within 4 hours |
+| Info | 1.5-2 std devs OR non-critical metric | Review in next daily check |
+
+## Investigation Framework
+When an anomaly is detected:
+1. **Verify**: Is the data correct? (not a tracking bug)
+2. **Scope**: Is it one metric or multiple? One segment or all?
+3. **Timeline**: When did it start? Is it ongoing?
+4. **Cause**: External event? Internal change? Deploy? Marketing campaign?
+5. **Impact**: Business impact in dollars or users
+6. **Action**: Fix needed or will it self-resolve?
+
+## Workflow
+1. Load time-series data
+2. Calculate baseline statistics (mean, std, percentiles)
+3. Apply anomaly detection methods
+4. Flag anomalies with severity
+5. Generate alert report with context
+6. Suggest investigation steps for each anomaly
+
+## Output
+Save to \\\`./alerts/anomalies-{date}.md\\\``,
+      },
+      {
+        name: "forecast-builder",
+        description: "Build time-series forecasts for business metrics — revenue, users, churn — with confidence intervals.",
+        emoji: "\uD83D\uDD2E",
+        source: "GitHub",
+        sourceUrl: "https://github.com/facebook/prophet",
+        requires: { anyBins: ["python3", "node"] },
+        instructions: `# Forecast Builder
+
+Build forecasts for business metrics using statistical and trend-based methods.
+
+## When to Use
+- Revenue forecasting for budgeting
+- User growth projections
+- Capacity planning (infrastructure, hiring)
+- Investor reporting (projected vs. actual)
+
+## Forecasting Methods
+
+### Linear Trend
+Best for: Steady growth with no seasonality
+\\\`\\\`\\\`
+Forecast = baseline + (growth_rate x periods_ahead)
+\\\`\\\`\\\`
+
+### Growth Rate Extrapolation
+Best for: Compound growth (SaaS, user growth)
+\\\`\\\`\\\`
+Forecast = current_value x (1 + growth_rate) ^ periods_ahead
+\\\`\\\`\\\`
+
+### Moving Average
+Best for: Noisy data, short-term forecasts
+\\\`\\\`\\\`
+Forecast = average of last N periods
+\\\`\\\`\\\`
+
+### Seasonal Decomposition
+Best for: Data with recurring patterns (weekly, monthly, quarterly)
+1. Calculate the trend (moving average)
+2. Calculate seasonal component (deviation from trend per period)
+3. Forecast = Trend projection + Seasonal adjustment
+
+## Forecast Template
+
+| Month | Actual | Forecast | Lower Bound | Upper Bound | Variance |
+|-------|--------|----------|-------------|-------------|----------|
+| Jan | $50K | - | - | - | - |
+| Feb | $55K | - | - | - | - |
+| Mar | $60K | $58K | $54K | $62K | +$2K |
+| Apr | - | $64K | $58K | $70K | - |
+| May | - | $69K | $61K | $77K | - |
+
+## Confidence Intervals
+Always provide a range, not a point estimate:
+- **Narrow range** (90% confidence): +-1.645 x standard error
+- **Wide range** (50% confidence): +-0.675 x standard error
+- Wider intervals for further-out predictions
+
+## Forecast Accuracy Tracking
+
+| Metric | Formula | Target |
+|--------|---------|--------|
+| MAPE | Mean Absolute Percentage Error | <15% |
+| Bias | Average (Forecast - Actual) | Near 0 |
+| Accuracy | 1 - MAPE | >85% |
+
+## Scenario Planning
+Always provide three scenarios:
+- **Optimistic**: Top 25th percentile outcome
+- **Base case**: Median outcome
+- **Pessimistic**: Bottom 25th percentile outcome
+
+## Workflow
+1. Gather historical data (minimum 6-12 data points)
+2. Check for trends, seasonality, and anomalies
+3. Choose appropriate forecasting method
+4. Generate forecast with confidence intervals
+5. Validate against holdout data (if available)
+6. Present with scenarios and assumptions documented
+
+## Output
+Save to \\\`./forecasts/{metric}-{date}.md\\\` with methodology notes`,
+      },
+      {
+        name: "dashboard-designer",
+        description: "Design analytics dashboards — choose the right metrics, layout, visualizations, and refresh cadence.",
+        emoji: "\uD83D\uDCF1",
+        source: "GitHub",
+        sourceUrl: "https://github.com/apache/superset",
+        instructions: `# Dashboard Designer
+
+Design clear, actionable analytics dashboards for business stakeholders.
+
+## When to Use
+- Building executive dashboards
+- Setting up team performance dashboards
+- Creating customer-facing analytics
+- Replacing ad-hoc reporting with self-serve dashboards
+
+## Dashboard Design Principles
+
+### 1. Start with Questions
+Every dashboard should answer specific questions:
+- "Are we on track to hit our quarterly goal?"
+- "Which channels are driving the most signups?"
+- "Where are users dropping off?"
+
+### 2. Choose the Right Metrics
+- **Leading indicators**: Predict future performance (signups, activation rate)
+- **Lagging indicators**: Confirm past performance (revenue, churn)
+- **Diagnostic metrics**: Explain why (conversion rate by segment)
+
+### 3. Limit Metrics
+- Executive dashboard: 5-8 KPIs max
+- Team dashboard: 10-15 metrics max
+- If you need more, create separate focused dashboards
+
+## Visualization Selection Guide
+
+| Data Type | Best Chart | When to Use |
+|-----------|-----------|-------------|
+| Trend over time | Line chart | Revenue, users, growth |
+| Comparison | Bar chart | Channel performance, A/B results |
+| Composition | Pie/donut (max 6 slices) | Revenue by product, traffic by source |
+| Distribution | Histogram | Price distribution, response times |
+| Correlation | Scatter plot | Spend vs. revenue, NPS vs. retention |
+| Single metric | Big number with trend | KPI headlines |
+| Status | Red/yellow/green indicator | Goal tracking, SLA compliance |
+
+## Dashboard Layout
+
+### Top Row: KPI Headlines
+- Big numbers with period comparison
+- Green (improving), red (declining), gray (flat)
+- Example: MRR $50K (+12% MoM)
+
+### Middle: Trend Charts
+- Key metrics over time (line charts)
+- Include comparison period (dotted line for previous month/year)
+- Annotate significant events
+
+### Bottom: Breakdown Tables
+- Detailed data for exploration
+- Sortable, filterable
+- Drill-down links to detail views
+
+## Refresh Cadence
+
+| Dashboard Type | Refresh | Why |
+|---------------|---------|-----|
+| Ops / real-time | Every 5-15 min | Monitoring active systems |
+| Daily metrics | Every hour | Day-of performance tracking |
+| Weekly report | Daily | Trend tracking |
+| Executive | Daily | High-level monitoring |
+| Strategic | Weekly | Long-term trend analysis |
+
+## Workflow
+1. Identify the audience and their key questions
+2. Select metrics that answer those questions
+3. Choose visualization types for each metric
+4. Design the layout (sketch before building)
+5. Define data sources and refresh cadence
+6. Build and iterate based on feedback
+
+## Output
+Save dashboard spec to \\\`./dashboards/{name}-spec.md\\\``,
+      },
+      {
+        name: "reporting-template",
+        description: "Create reusable report templates for weekly, monthly, and quarterly business reporting.",
+        emoji: "\uD83D\uDCCB",
+        source: "GitHub",
+        sourceUrl: "https://github.com/metabase/metabase",
+        instructions: `# Reporting Template
+
+Create standardized, reusable report templates for recurring business reporting.
+
+## When to Use
+- Setting up weekly/monthly/quarterly reporting cadence
+- Standardizing reports across teams
+- Creating self-serve reporting for stakeholders
+- Replacing ad-hoc report requests with templates
+
+## Weekly Report Template
+
+### Performance Snapshot (Week of {date})
+
+**Key Metrics**
+| Metric | This Week | Last Week | WoW Change | Target | Status |
+|--------|----------|----------|-----------|--------|--------|
+| [Metric 1] | | | | | On track / At risk |
+| [Metric 2] | | | | | |
+
+**Highlights** (top 3 wins)
+1. [Win with metric]
+2. [Win with metric]
+3. [Win with metric]
+
+**Issues** (blockers or concerns)
+1. [Issue and planned action]
+
+**Next Week Focus**
+1. [Priority 1]
+2. [Priority 2]
+
+## Monthly Report Template
+
+### Executive Summary
+[3-5 sentences: overall performance, key wins, primary challenges]
+
+### KPI Dashboard
+
+| KPI | Actual | Target | % of Target | MoM Change | Trend |
+|-----|--------|--------|------------|-----------|-------|
+| Revenue | | | | | |
+| Customers | | | | | |
+| Churn | | | | | |
+| NPS/CSAT | | | | | |
+
+### Department Updates
+For each team: 2-3 bullet accomplishments, 1-2 challenges
+
+### Financial Summary
+- Revenue vs. budget
+- Burn rate
+- Runway update
+
+### Next Month Priorities
+Top 3-5 objectives with owners
+
+## Quarterly Business Review (QBR)
+
+### Quarter Summary
+- OKR scorecard (scored 0.0-1.0)
+- Revenue and growth vs. plan
+- Customer wins and losses
+- Product milestones delivered
+
+### Strategic Review
+- Market position update
+- Competitive landscape changes
+- Key learnings and pivots
+
+### Next Quarter Plan
+- Objectives and key results
+- Key initiatives and owners
+- Resource requirements
+- Risks and mitigation
+
+## Report Writing Rules
+- Facts first, opinions clearly labeled
+- Always include comparison period
+- Use consistent formatting across reports
+- Highlight exceptions (good and bad)
+- Keep executive summaries under 5 sentences
+- Include "so what?" — not just data, but implications
+
+## Workflow
+1. Choose the report type and cadence
+2. Define the metrics and data sources
+3. Create the template with placeholders
+4. Pull data and populate
+5. Add narrative and highlights
+6. Distribute on schedule
+
+## Output
+Save templates to \\\`./reports/templates/{type}.md\\\``,
+      },
+      {
+        name: "ab-test-analyzer",
+        description: "Analyze A/B test results with statistical significance, confidence intervals, and business impact calculation.",
+        emoji: "\uD83E\uDDEA",
+        source: "GitHub",
+        sourceUrl: "https://github.com/growthbook/growthbook",
+        instructions: `# A/B Test Analyzer
+
+Analyze experiment results for statistical significance and business impact.
+
+## When to Use
+- After an A/B test reaches target sample size
+- When stakeholders ask "did the test win?"
+- Comparing performance across variants
+- Deciding whether to ship a change
+
+## Analysis Checklist
+
+### 1. Data Quality
+- Did the test reach the target sample size?
+- Was traffic evenly split? (check for sampling bias)
+- Were there any data collection issues during the test?
+- Any external factors that might have influenced results? (outages, holidays, promotions)
+
+### 2. Statistical Significance
+
+| Metric | Control | Variant | Difference | p-value | Significant? |
+|--------|---------|---------|-----------|---------|-------------|
+| Primary metric | X% | Y% | +Z% | 0.0X | Yes/No |
+| Secondary metric 1 | | | | | |
+| Secondary metric 2 | | | | | |
+| Guardrail metric | | | | | |
+
+### Significance Thresholds
+- p < 0.05: Statistically significant (95% confidence)
+- p < 0.01: Highly significant (99% confidence)
+- p > 0.05: Not significant — cannot reject null hypothesis
+
+### 3. Effect Size
+- Is the observed effect large enough to matter?
+- Absolute change: X% -> Y% (difference of Z percentage points)
+- Relative change: +Z% improvement
+
+### 4. Confidence Intervals
+Report the range, not just the point estimate:
+- "The true effect is between +A% and +B% with 95% confidence"
+- If the interval includes 0, the result is not significant
+
+### 5. Segment Analysis
+Check if results hold across:
+- Device type (mobile vs. desktop)
+- New vs. returning users
+- Geography
+- User segment (free vs. paid)
+
+### 6. Business Impact
+\\\`\\\`\\\`
+Annual impact = Daily traffic x Conversion lift x Revenue per conversion x 365
+\\\`\\\`\\\`
+
+## Decision Framework
+
+| Scenario | Decision |
+|----------|----------|
+| Significant winner + meaningful effect | Ship the variant |
+| Significant winner + tiny effect | Ship if no cost to maintain |
+| Not significant + positive trend | Extend test or run larger follow-up |
+| Not significant + flat/negative | Keep control, learn and iterate |
+| Guardrail metric degraded | Do NOT ship, investigate |
+
+## Common Mistakes
+- Stopping the test early because it "looks good" (peeking problem)
+- Declaring a winner without reaching sample size
+- Ignoring guardrail metrics
+- Running too many tests on the same page simultaneously
+- Not segmenting results
+
+## Output
+Save to \\\`./experiments/{test-name}-analysis.md\\\``,
+      },
+      {
+        name: "data-dictionary",
+        description: "Create and maintain data dictionaries documenting tables, columns, definitions, and data lineage.",
+        emoji: "\uD83D\uDCD6",
+        source: "GitHub",
+        sourceUrl: "https://github.com/datahub-project/datahub",
+        instructions: `# Data Dictionary
+
+Create and maintain documentation for databases, datasets, and data schemas.
+
+## When to Use
+- Onboarding new team members to the data
+- Documenting a new database or dataset
+- When analysts ask "what does this column mean?"
+- Building shared understanding of data definitions
+
+## Data Dictionary Template
+
+### Table: {table_name}
+**Description**: [What this table contains and its purpose]
+**Owner**: [Team or person responsible]
+**Update frequency**: [Real-time, daily, weekly, manual]
+**Row count**: [Approximate, with date]
+**Primary key**: [Column(s)]
+
+### Column Definitions
+
+| Column | Type | Description | Example | Nullable | Source |
+|--------|------|-----------|---------|----------|--------|
+| id | integer | Unique row identifier | 12345 | No | Auto-generated |
+| user_id | integer | Foreign key to users table | 67890 | No | Application |
+| created_at | timestamp | When the record was created | 2026-01-15T10:30:00Z | No | Application |
+| status | enum | Current status | active, paused, canceled | No | Application |
+| amount | decimal | Transaction amount in cents | 9999 | Yes | Payment processor |
+
+### Enum Values
+For each enum/categorical column, list all possible values:
+
+| Value | Description |
+|-------|-----------|
+| active | Currently active and in good standing |
+| paused | Temporarily suspended by user |
+| canceled | Permanently terminated |
+
+### Relationships
+- \\\`user_id\\\` -> \\\`users.id\\\` (many-to-one)
+- \\\`orders\\\` -> \\\`order_items.order_id\\\` (one-to-many)
+
+### Data Quality Notes
+- Column X has 5% null values (acceptable for optional field)
+- Column Y was added in March 2026 (null for earlier records)
+- Column Z is deprecated — use column W instead
+
+## Metric Definitions
+For derived metrics, document the exact calculation:
+
+| Metric | Definition | Formula | Notes |
+|--------|-----------|---------|-------|
+| MRR | Monthly Recurring Revenue | Sum of active subscription amounts | Excludes one-time charges |
+| Churn rate | % of customers who cancel | Canceled in period / Active at start of period | Monthly basis |
+| Activation rate | % of signups who complete key action | Activated users / Signups in cohort | Within 7 days |
+
+## Workflow
+1. Inventory all tables/datasets
+2. Document each table and its columns
+3. Define relationships between tables
+4. Document derived metrics with exact formulas
+5. Note data quality issues and gotchas
+6. Review and update quarterly
+
+## Output
+Save to \\\`./docs/data-dictionary.md\\\``,
+      },
+      {
+        name: "statistical-analysis",
+        description: "Run statistical tests — correlation, regression, hypothesis testing, and significance analysis.",
+        emoji: "\uD83D\uDCCA",
+        source: "GitHub",
+        sourceUrl: "https://github.com/scipy/scipy",
+        requires: { anyBins: ["python3", "node"] },
+        instructions: `# Statistical Analysis
+
+Apply statistical methods to answer business questions with data.
+
+## When to Use
+- Testing whether a change had a real impact
+- Finding relationships between variables
+- Validating assumptions with data
+- Providing confidence levels for business decisions
+
+## Common Statistical Tests
+
+### Descriptive Statistics
+Start every analysis with:
+- **Central tendency**: Mean, median, mode
+- **Spread**: Standard deviation, IQR, range
+- **Shape**: Skewness, kurtosis
+- **Counts**: N, missing values, unique values
+
+### Hypothesis Testing
+
+| Test | When to Use | Example |
+|------|-----------|---------|
+| t-test (2 sample) | Compare means of 2 groups | Is avg. order value different between mobile and desktop? |
+| Chi-squared | Compare proportions/frequencies | Is conversion rate different across channels? |
+| ANOVA | Compare means of 3+ groups | Is satisfaction different across plan tiers? |
+| Mann-Whitney U | Compare 2 groups (non-normal data) | Is time-to-resolve different for P1 vs P2 tickets? |
+
+### Correlation Analysis
+- **Pearson**: Linear relationship between two continuous variables
+- **Spearman**: Monotonic relationship (works for non-linear)
+- **Interpretation**: r > 0.7 strong, 0.4-0.7 moderate, < 0.4 weak
+- **Warning**: Correlation does not imply causation
+
+### Regression
+- **Simple linear**: y = mx + b (one predictor)
+- **Multiple linear**: y = b0 + b1x1 + b2x2 + ... (multiple predictors)
+- **Key metrics**: R-squared (fit), p-values (significance), coefficients (effect size)
+
+## Results Interpretation
+
+### p-values
+- p < 0.05: Statistically significant (reject null hypothesis)
+- p > 0.05: Not significant (cannot reject null)
+- p-value is NOT the probability the result is due to chance
+- Always report effect size alongside p-value
+
+### Effect Size
+- Small, medium, large depends on context
+- A tiny but "significant" effect may not matter practically
+- A large but "not significant" effect may need more data
+
+### Confidence Intervals
+- 95% CI: We're 95% confident the true value falls in this range
+- Narrower intervals = more precise estimate
+- If CI includes 0 (for differences), not significant
+
+## Common Pitfalls
+- Multiple comparisons without correction (Bonferroni)
+- Assuming normal distribution without checking
+- Small sample sizes leading to unreliable results
+- Confounding variables not controlled for
+- Cherry-picking significant results
+
+## Workflow
+1. Define the question and hypothesis
+2. Check data quality and assumptions
+3. Choose the appropriate test
+4. Run the analysis
+5. Interpret results in business context
+6. Report findings with confidence levels and caveats
+
+## Output
+Save to \\\`./analysis/{topic}-statistical.md\\\``,
       },
     ],
     heartbeat: `# HEARTBEAT.md — Data Analyst
@@ -6639,6 +12319,672 @@ Error: API call failed. Please try again.
 | **HubSpot Operations** | Workflow descriptions, property docs |
 | **Data Orchestration** | API docs, integration guides |`,
       },
+      {
+        name: "lead-scoring-model",
+        description: "Design and implement lead scoring models that combine fit, intent, and engagement data to prioritize pipeline.",
+        emoji: "\uD83C\uDFB0",
+        source: "GitHub",
+        sourceUrl: "https://github.com/brightdata/ai-lead-generator",
+        instructions: `# Lead Scoring Model
+
+Design lead scoring models that predict conversion likelihood and prioritize sales effort.
+
+## When to Use
+- Setting up or redesigning lead scoring in your CRM
+- Sales complains about lead quality
+- Marketing and sales misaligned on "qualified" definition
+- Optimizing handoff between marketing and sales
+
+## Scoring Framework
+
+### Fit Score (Demographic/Firmographic)
+
+| Criteria | Points | Logic |
+|----------|--------|-------|
+| Company size (employees) | 0-20 | Sweet spot = 20, adjacent = 10, outside = 0 |
+| Industry | 0-15 | Target vertical = 15, adjacent = 8, other = 0 |
+| Title/seniority | 0-15 | Decision maker = 15, influencer = 10, user = 5 |
+| Revenue range | 0-10 | ICP range = 10, close = 5, far = 0 |
+| Geography | 0-10 | Target market = 10, secondary = 5, other = 0 |
+| Technology indicators | 0-10 | Complementary tech = 10, neutral = 5, incompatible = 0 |
+
+### Intent Score (Behavioral)
+
+| Signal | Points | Decay |
+|--------|--------|-------|
+| Demo request | +25 | None |
+| Pricing page visit | +15 | 7 days |
+| Case study download | +10 | 14 days |
+| Blog visits (3+ in a week) | +8 | 7 days |
+| Email click | +5 | 14 days |
+| Webinar attendance | +10 | 30 days |
+| Job posting matching solution | +12 | 30 days |
+| Funding announcement | +10 | 60 days |
+
+### Negative Scoring (Disqualifiers)
+- Competitor email domain: -50
+- Student/personal email on enterprise form: -20
+- Unsubscribed from emails: -15
+- Bounced email: -30
+- No activity 60+ days: -10
+
+### Score Tiers
+
+| Score | Label | Action | SLA |
+|-------|-------|--------|-----|
+| 80+ | Hot / MQL | Immediate sales follow-up | 4 hours |
+| 60-79 | Warm | Priority nurture + SDR outreach | 24 hours |
+| 40-59 | Cool | Automated nurture sequence | Weekly |
+| 20-39 | Cold | Low-touch nurture | Monthly |
+| 0-19 | Disqualified | Archive | None |
+
+## Implementation in HubSpot
+- Create custom property: \\\`lead_score\\\` (number)
+- Create workflow per scoring rule
+- Set MQL threshold trigger for sales notification
+- Create dashboard showing score distribution
+- Review and recalibrate quarterly
+
+## Model Validation
+- Compare scores of closed-won vs. closed-lost deals
+- Check if higher-scored leads convert at higher rates
+- Look for false positives (high score, never converts)
+- Look for false negatives (low score, actually converts)
+
+## Output
+Save to \\\`./scoring/lead-scoring-model.md\\\``,
+      },
+      {
+        name: "attribution-modeling",
+        description: "Build marketing attribution models — first-touch, last-touch, multi-touch, and data-driven attribution.",
+        emoji: "\uD83D\uDCCD",
+        source: "GitHub",
+        sourceUrl: "https://github.com/growthbook/growthbook",
+        instructions: `# Attribution Modeling
+
+Build attribution models to understand which marketing channels drive conversions.
+
+## When to Use
+- Allocating marketing budget across channels
+- Proving ROI of specific campaigns
+- Understanding the customer journey
+- Reporting marketing performance to leadership
+
+## Attribution Models
+
+### Single-Touch Models
+
+| Model | Credit | Best For | Limitation |
+|-------|--------|---------|-----------|
+| First-touch | 100% to first interaction | Understanding awareness channels | Ignores nurture |
+| Last-touch | 100% to last interaction | Understanding conversion channels | Ignores discovery |
+
+### Multi-Touch Models
+
+| Model | Credit Distribution | Best For |
+|-------|-------------------|---------|
+| Linear | Equal across all touches | Fair starting point |
+| Time-decay | More credit to recent touches | Sales-heavy motions |
+| U-shaped | 40% first, 40% last, 20% middle | Balanced view |
+| W-shaped | First, lead creation, opportunity creation weighted | B2B sales funnels |
+
+### Custom/Data-Driven
+- Use historical data to determine which channels actually predict conversion
+- Requires 500+ conversions for statistical validity
+- Tools: Google Analytics 4 (data-driven), HubSpot multi-touch, custom models
+
+## Implementation
+
+### UTM Tracking Framework
+Standardize UTM parameters across all channels:
+
+| Parameter | Convention | Example |
+|-----------|-----------|---------|
+| utm_source | Platform name | google, linkedin, newsletter |
+| utm_medium | Channel type | cpc, organic, email, social |
+| utm_campaign | Campaign name | spring-launch-2026 |
+| utm_content | Ad/content variant | hero-a, cta-demo |
+| utm_term | Keyword (paid search) | ai-sales-tools |
+
+### Touchpoint Tracking
+For each conversion, capture:
+- All marketing touchpoints (channel, campaign, content)
+- Timestamps of each interaction
+- Sales touchpoints (calls, emails, meetings)
+- Time between first touch and conversion
+
+## Attribution Report Template
+
+| Channel | First-Touch | Last-Touch | Linear | Spend | ROI |
+|---------|------------|-----------|--------|-------|-----|
+| Organic Search | X | Y | Z | $0 | -- |
+| Paid Search | X | Y | Z | $A | $B/$A |
+| LinkedIn Ads | X | Y | Z | $A | $B/$A |
+| Email | X | Y | Z | $A | $B/$A |
+| Content/Blog | X | Y | Z | $A | $B/$A |
+
+## Workflow
+1. Define conversion events (demo request, signup, closed-won)
+2. Audit UTM tracking across all channels
+3. Pull touchpoint data for converted and non-converted leads
+4. Run multiple attribution models
+5. Compare model results
+6. Make budget allocation recommendations
+
+## Output
+Save to \\\`./attribution/model-{date}.md\\\``,
+      },
+      {
+        name: "sales-enablement",
+        description: "Create sales enablement content — battle cards, one-pagers, email templates, and talk tracks.",
+        emoji: "\uD83C\uDFAF",
+        source: "GitHub",
+        sourceUrl: "https://github.com/therealcrowder/SalesOperations",
+        instructions: `# Sales Enablement
+
+Create content and tools that help the sales team sell more effectively.
+
+## When to Use
+- Onboarding new sales reps
+- Launching a new product or feature
+- Entering a new market or persona
+- Sales win rates declining
+
+## Enablement Content Types
+
+### One-Pagers
+- **Product overview**: What it does, who it's for, key benefits
+- **Feature spotlight**: Deep dive on a specific feature
+- **Industry solution**: How you solve problems for a specific vertical
+- **ROI summary**: Quantified business impact for prospects
+
+### Talk Tracks
+Scripted conversation guides for specific scenarios:
+
+**Discovery Call Talk Track**
+1. Opening (build rapport, set agenda)
+2. Situation questions (understand current state)
+3. Problem questions (identify pain points)
+4. Implication questions (amplify the pain)
+5. Need-payoff questions (connect to your solution)
+6. Next steps (schedule demo, send materials)
+
+**Demo Talk Track**
+1. Recap discovery findings
+2. Show 3 features mapped to their 3 pain points
+3. Highlight differentiators
+4. Address anticipated objections
+5. Propose next steps
+
+### Email Templates
+Create templates for each sales stage:
+- Initial outreach (cold + warm variants)
+- Post-discovery follow-up
+- Post-demo follow-up
+- Proposal delivery
+- Negotiation / objection handling
+- Closed-lost re-engagement
+
+### Competitive Battle Cards
+Per competitor:
+- Quick facts (size, pricing, target market)
+- Where we win / where they win
+- Landmine questions (expose their weaknesses)
+- Objection responses
+
+## Enablement Program Structure
+
+| Phase | Content | Timing |
+|-------|---------|--------|
+| Day 1-5 | Product overview, ICP, personas | Onboarding |
+| Week 2 | Talk tracks, demo certification | Ramp-up |
+| Week 3-4 | Battle cards, objection handling | Advanced |
+| Monthly | New feature updates, market intel | Ongoing |
+| Quarterly | Win/loss learnings, process updates | Review |
+
+## Workflow
+1. Assess what content exists and what's missing
+2. Prioritize by impact (what would help close more deals?)
+3. Create content using templates above
+4. Get sales feedback (is this useful?)
+5. Distribute and train
+6. Measure adoption and impact on win rates
+
+## Output
+Save to \\\`./enablement/{content-type}/{name}.md\\\``,
+      },
+      {
+        name: "deal-desk-ops",
+        description: "Manage deal desk operations — pricing approvals, discount workflows, custom terms, and deal structure.",
+        emoji: "\uD83D\uDCBC",
+        source: "GitHub",
+        sourceUrl: "https://github.com/twentyhq/twenty",
+        instructions: `# Deal Desk Operations
+
+Manage deal desk workflows for pricing, approvals, and custom deal structures.
+
+## When to Use
+- Non-standard pricing requests from sales
+- Custom contract terms needed
+- Multi-year deal structuring
+- Discount approval workflows
+- Enterprise deal configuration
+
+## Pricing Approval Matrix
+
+| Discount Level | Approver | Turnaround |
+|---------------|----------|-----------|
+| 0-10% | Sales rep (self-service) | Immediate |
+| 11-20% | Sales manager | 4 hours |
+| 21-30% | VP Sales | 24 hours |
+| 31-50% | CRO / CEO | 48 hours |
+| >50% | CEO + Finance | Case-by-case |
+
+## Deal Structure Options
+
+### Pricing Models
+
+| Model | When to Use | Considerations |
+|-------|-----------|---------------|
+| Monthly subscription | Standard deals, low commitment | Higher effective price |
+| Annual prepay | Customers who want a discount | 15-20% discount is standard |
+| Multi-year | Enterprise, want predictability | 25-35% discount, lock-in value |
+| Usage-based | Variable consumption patterns | Floor + overage structure |
+| Hybrid | Complex enterprise needs | Base subscription + usage tier |
+
+### Payment Terms
+
+| Term | Standard | When to Deviate |
+|------|---------|----------------|
+| Net 30 | Default | Most deals |
+| Net 45/60 | Large enterprise, procurement | When deal size justifies |
+| Annual upfront | Discounted annual | Standard SaaS |
+| Quarterly | Middle ground | Customer cash flow concerns |
+
+## Deal Review Checklist
+For non-standard deals:
+- [ ] Deal size justifies the custom terms?
+- [ ] Discount within approval authority?
+- [ ] Custom terms reviewed by legal?
+- [ ] Impact on metrics (ARR, ACV, margins)?
+- [ ] Precedent risk (will others want the same?)
+- [ ] Renewal terms clear?
+
+## Deal Desk Request Template
+When submitting for approval:
+- **Customer**: Company name, size, industry
+- **Deal value**: ACV, TCV, payment terms
+- **Discount**: % off list, justification
+- **Custom terms**: What's non-standard and why
+- **Competitive pressure**: Who else are they evaluating?
+- **Strategic value**: Logos, expansion potential, reference-ability
+- **Risk**: What happens if we don't approve?
+
+## Workflow
+1. Sales submits deal desk request
+2. Validate deal parameters against pricing matrix
+3. Route to appropriate approver based on discount level
+4. Review custom terms for risk and precedent
+5. Approve, modify, or reject with reasoning
+6. Document for future reference and pattern analysis
+
+## Output
+Save to \\\`./deal-desk/requests/{deal-name}.md\\\``,
+      },
+      {
+        name: "territory-design",
+        description: "Design and optimize sales territories with account distribution, quota modeling, and coverage analysis.",
+        emoji: "\uD83D\uDDFA\uFE0F",
+        source: "GitHub",
+        sourceUrl: "https://github.com/twentyhq/twenty",
+        instructions: `# Territory Design
+
+Design balanced sales territories that maximize coverage and revenue potential.
+
+## When to Use
+- Annual or quarterly territory planning
+- Adding new reps and redistributing accounts
+- Entering new market segments
+- Rebalancing after uneven performance or rep turnover
+
+## Territory Design Process
+
+### 1. Segmentation Strategy
+
+| Approach | Best For | Example |
+|----------|---------|---------|
+| Geographic | Field sales, regional presence | Northeast, Southeast, West |
+| Industry vertical | Specialist selling | Healthcare, Fintech, E-commerce |
+| Company size | Different sales motions | SMB, Mid-Market, Enterprise |
+| Named accounts | Strategic selling | Top 50 accounts assigned individually |
+| Hybrid | Most B2B SaaS | Region + Size (Enterprise West, Mid-Market East) |
+
+### 2. Data-Driven Assignment
+For each territory, optimize:
+
+| Factor | Target Balance | Priority |
+|--------|---------------|---------|
+| Total addressable accounts | Within 15% of average | High |
+| Revenue potential (TAM) | Within 20% of average | High |
+| Existing revenue | Preserve rep-customer relationships | Medium |
+| Growth opportunity | Mix of hunting + farming | Medium |
+| Geographic concentration | Minimize travel time | Low |
+
+### 3. Quota Modeling
+
+\\\`\\\`\\\`
+Territory Quota = Territory TAM x Win Rate x Average Deal Size
+
+Factors:
+- Historical win rate for similar accounts
+- Rep experience level (new rep = lower quota first year)
+- Market maturity (new market = lower quota)
+- Product maturity (new product = lower quota)
+\\\`\\\`\\\`
+
+### Quota Distribution
+
+| Quota Type | % of Total | Purpose |
+|-----------|-----------|---------|
+| New business | 60-70% | Growth |
+| Expansion | 20-30% | Upsell/cross-sell |
+| Renewal | 10-20% | Retention (if applicable) |
+
+### 4. Coverage Analysis
+
+| Metric | Formula | Target |
+|--------|---------|--------|
+| Account coverage | Accounts with activity / Total accounts | >80% |
+| TAM coverage | TAM of covered accounts / Total TAM | >90% |
+| Engagement ratio | Accounts engaged / Accounts assigned | >50% |
+| White space | Unassigned accounts with ICP fit | Minimize |
+
+## Territory Card Template
+For each territory:
+- Territory name and owner
+- Account count and TAM
+- Top 10 target accounts
+- Existing revenue and customers
+- Quota and attainment (if historical)
+- Coverage gaps and growth opportunities
+
+## Workflow
+1. Pull account data (company, size, industry, location, revenue)
+2. Define segmentation strategy
+3. Run optimization (balance accounts across territories)
+4. Generate territory cards
+5. Model quotas per territory
+6. Review with sales leadership
+7. Implement in CRM
+
+## Output
+Save to \\\`./territories/{fiscal-year}/design.md\\\` and \\\`./territories/{fiscal-year}/assignments.csv\\\``,
+      },
+      {
+        name: "tech-stack-auditor",
+        description: "Audit and optimize the GTM tech stack — identify redundancies, gaps, integration issues, and cost savings.",
+        emoji: "\uD83D\uDD27",
+        source: "GitHub",
+        sourceUrl: "https://github.com/n8n-io/n8n",
+        instructions: `# GTM Tech Stack Auditor
+
+Audit the go-to-market technology stack for efficiency, gaps, and cost optimization.
+
+## When to Use
+- Annual tech stack review
+- After rapid tool adoption (too many tools)
+- When integration issues cause data problems
+- Budget cuts requiring tool consolidation
+- Evaluating a new tool purchase
+
+## Audit Framework
+
+### Current Stack Inventory
+
+| Tool | Category | Monthly Cost | Users | Adoption | Contract End |
+|------|----------|-------------|-------|----------|-------------|
+| [Tool] | CRM | $X | Y | Z% | Date |
+| [Tool] | Enrichment | $X | Y | Z% | Date |
+| [Tool] | Outbound | $X | Y | Z% | Date |
+
+### GTM Tech Stack Categories
+
+| Category | Purpose | Common Tools |
+|----------|---------|-------------|
+| CRM | Customer data, pipeline | HubSpot, Salesforce |
+| Sales engagement | Outbound sequences | Outreach, Salesloft, Apollo |
+| Data enrichment | Contact and company data | Clay, ZoomInfo, Apollo, Clearbit |
+| Marketing automation | Email, campaigns | HubSpot, Marketo, Customer.io |
+| Analytics | Attribution, reporting | GA4, Mixpanel, Amplitude |
+| Conversation intel | Call recording, analysis | Gong, Chorus |
+| Scheduling | Meeting booking | Calendly, Chili Piper |
+| ABM | Account-based marketing | 6sense, Demandbase |
+
+### Health Check Per Tool
+
+| Dimension | Score (1-5) | Notes |
+|-----------|------------|-------|
+| Adoption | | % of intended users actively using it |
+| Data quality | | Is the data accurate and complete? |
+| Integration | | Connected to other tools properly? |
+| ROI | | Generating more value than it costs? |
+| Overlap | | Is another tool doing the same thing? |
+| Support | | Vendor responsive and helpful? |
+
+### Common Issues to Detect
+- **Overlap**: Two tools doing the same job
+- **Gaps**: Missing category (no enrichment, no attribution)
+- **Broken integrations**: Data not flowing between tools
+- **Low adoption**: Paying for tool nobody uses
+- **Data silos**: Information trapped in one tool
+- **Over-spending**: Enterprise plan when startup tier would do
+
+## Optimization Recommendations
+
+| Finding | Impact | Effort | Action |
+|---------|--------|--------|--------|
+| Duplicate tools | Cost saving | Medium | Consolidate to one |
+| Low adoption | Cost saving | Low | Train or cancel |
+| Missing integration | Data quality | High | Build integration |
+| Over-provisioned | Cost saving | Low | Downgrade plan |
+| Missing category | Capability gap | Medium | Evaluate and purchase |
+
+## Workflow
+1. Inventory all GTM tools (ask each team)
+2. Document costs, users, adoption, and contracts
+3. Map data flows between tools
+4. Score each tool on health dimensions
+5. Identify overlaps, gaps, and issues
+6. Calculate potential savings
+7. Present recommendations with prioritization
+
+## Output
+Save to \\\`./audits/tech-stack-{date}.md\\\``,
+      },
+      {
+        name: "quota-planner",
+        description: "Build quota plans with top-down and bottom-up modeling, ramp schedules, and attainment tracking.",
+        emoji: "\uD83D\uDCCA",
+        source: "GitHub",
+        sourceUrl: "https://github.com/twentyhq/twenty",
+        instructions: `# Quota Planner
+
+Build quota plans with top-down targets, bottom-up capacity, and ramp schedules.
+
+## When to Use
+- Annual or quarterly quota planning
+- Adding new reps (ramp schedule needed)
+- Quota rebalancing mid-period
+- Board-level capacity planning
+
+## Quota Planning Framework
+
+### Top-Down Approach
+Start with the company target and work backwards:
+
+\\\`\\\`\\\`
+Company Revenue Target: $X
+/ Average Quota Attainment: Y%
+= Total Quota Required: $Z
+/ Number of Reps: N
+= Average Quota per Rep: $Q
+\\\`\\\`\\\`
+
+### Bottom-Up Approach
+Start with rep capacity and build up:
+
+\\\`\\\`\\\`
+Per Rep:
+  Average Deal Size: $X
+  x Deals per Quarter: Y
+  x Win Rate: Z%
+  = Rep Capacity: $C
+
+Total Capacity:
+  Fully Ramped Reps x Capacity
+  + Ramping Reps x Adjusted Capacity
+  = Total Team Capacity
+\\\`\\\`\\\`
+
+### Reconciliation
+If top-down and bottom-up don't match:
+- Gap = More reps or larger deals needed
+- Surplus = Raise quotas or reduce hiring plan
+
+## Ramp Schedule
+
+| Ramp Period | Quota % | Expectations |
+|-------------|---------|-------------|
+| Month 1 | 0% | Training, shadowing, learning |
+| Month 2 | 25% | First outreach, pipeline building |
+| Month 3 | 50% | Active selling, first deals expected |
+| Month 4 | 75% | Building momentum |
+| Month 5+ | 100% | Fully ramped |
+
+### Ramp-Adjusted Capacity
+\\\`\\\`\\\`
+Ramping Rep Contribution = Full Quota x Ramp % x Expected Attainment
+\\\`\\\`\\\`
+
+## Quota Distribution Methods
+
+| Method | Logic | Best For |
+|--------|-------|---------|
+| Equal | Same quota for all | Homogeneous territories |
+| Territory-weighted | Based on territory TAM | Diverse territories |
+| Historical | Based on past performance | Established teams |
+| Hybrid | Base quota + territory adjustment | Most B2B teams |
+
+## Attainment Tracking
+
+| Rep | Quota | Closed | Pipeline | Coverage | Forecast |
+|-----|-------|--------|----------|----------|----------|
+| Rep A | $200K | $80K | $500K | 2.5x | $150K |
+| Rep B | $200K | $120K | $300K | 1.5x | $180K |
+
+### Pipeline Coverage Rules
+- **3x coverage**: Standard target for full-cycle reps
+- **4x coverage**: Newer reps or new market
+- **2x coverage**: Experienced reps with high win rates
+
+## Workflow
+1. Set company revenue target
+2. Run top-down quota calculation
+3. Run bottom-up capacity model
+4. Reconcile gap or surplus
+5. Apply ramp schedules for new reps
+6. Distribute quotas across territories
+7. Set up attainment tracking
+
+## Output
+Save to \\\`./planning/quota-{period}.md\\\``,
+      },
+      {
+        name: "revenue-reporting",
+        description: "Build revenue reports with MRR/ARR tracking, cohort revenue, expansion/contraction, and board-ready formatting.",
+        emoji: "\uD83D\uDCB5",
+        source: "GitHub",
+        sourceUrl: "https://github.com/metabase/metabase",
+        instructions: `# Revenue Reporting
+
+Build comprehensive revenue reports for leadership, board, and investors.
+
+## When to Use
+- Monthly revenue reviews
+- Board meeting preparation
+- Investor updates
+- Annual planning
+
+## Key Revenue Metrics
+
+### SaaS Revenue Metrics
+
+| Metric | Formula | Target |
+|--------|---------|--------|
+| MRR | Sum of all active monthly subscription revenue | Growing |
+| ARR | MRR x 12 | Growing |
+| New MRR | MRR from new customers this period | Growing |
+| Expansion MRR | Upsell/cross-sell revenue increase | Growing |
+| Contraction MRR | Downgrades from existing customers | Minimizing |
+| Churn MRR | Revenue lost from canceled customers | <2% monthly |
+| Net New MRR | New + Expansion - Contraction - Churn | Positive |
+| Net Revenue Retention | (Start MRR + Expansion - Contraction - Churn) / Start MRR | >100% |
+| Gross Revenue Retention | (Start MRR - Contraction - Churn) / Start MRR | >85% |
+
+### Revenue Waterfall
+
+\\\`\\\`\\\`
+Starting MRR:      $100,000
++ New MRR:         + $15,000
++ Expansion MRR:   + $8,000
+- Contraction MRR: - $3,000
+- Churn MRR:       - $5,000
+= Ending MRR:      $115,000
+Net New MRR:       $15,000
+Net Revenue Retention: 103%
+\\\`\\\`\\\`
+
+### Cohort Revenue Analysis
+Track revenue per customer cohort over time:
+
+| Signup Month | Month 1 | Month 3 | Month 6 | Month 12 |
+|-------------|---------|---------|---------|----------|
+| Jan 2026 | $5K | $6K | $7K | $8K |
+| Feb 2026 | $7K | $8K | $9K | |
+| Mar 2026 | $10K | $12K | | |
+
+Healthy pattern: Revenue per cohort grows over time (expansion > churn)
+
+## Board-Ready Revenue Slide
+
+### Key Metrics Table
+| Metric | This Month | Last Month | MoM | Plan | vs Plan |
+|--------|-----------|-----------|-----|------|---------|
+| ARR | | | | | |
+| Net New ARR | | | | | |
+| New Customers | | | | | |
+| NRR | | | | | |
+| Churn Rate | | | | | |
+
+### Charts to Include
+1. MRR waterfall (stacked bar: new, expansion, contraction, churn)
+2. ARR trend line (12+ months with projection)
+3. Net Revenue Retention trend
+4. Revenue by segment/plan
+5. Pipeline coverage vs. quota
+
+## Workflow
+1. Pull subscription and revenue data
+2. Calculate all revenue metrics
+3. Build the waterfall analysis
+4. Create cohort revenue analysis
+5. Compare to plan/forecast
+6. Identify trends and anomalies
+7. Generate board-ready report
+
+## Output
+Save to \\\`./reports/revenue/revenue-{period}.md\\\``,
+      },
     ],
     heartbeat: `# HEARTBEAT.md — GTM Engineer
 
@@ -6655,3 +13001,8 @@ Check \`memory/heartbeat-state.json\` for last check times. Rotate through these
 If nothing needs attention, reply HEARTBEAT_OK.`,
   },
 };
+
+// Append Nex skill to all persona templates
+for (const key of Object.keys(PERSONA_CONFIGS)) {
+  PERSONA_CONFIGS[key].skills.push(NEX_SKILL);
+}

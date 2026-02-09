@@ -34,6 +34,13 @@ if (!g.__clawgent_db) {
 
     CREATE INDEX IF NOT EXISTS idx_instances_userId ON instances(userId);
     CREATE INDEX IF NOT EXISTS idx_instances_status ON instances(status);
+
+    CREATE TABLE IF NOT EXISTS usage_tracking (
+      userId    TEXT NOT NULL,
+      date      TEXT NOT NULL,
+      callCount INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (userId, date)
+    );
   `);
 
   // Migration: add expiresAt column if it doesn't exist (for existing DBs)
@@ -68,6 +75,9 @@ const stmtUpsert = db.prepare(`
 
 const stmtGetById = db.prepare("SELECT * FROM instances WHERE id = ?");
 const stmtGetByUserId = db.prepare("SELECT * FROM instances WHERE userId = ? LIMIT 1");
+const stmtGetByUserIdActive = db.prepare("SELECT * FROM instances WHERE userId = ? AND status IN ('running', 'starting') LIMIT 1");
+const stmtGetOrphaned = db.prepare("SELECT * FROM instances WHERE status IN ('error', 'stopped')");
+const stmtDeleteOldStale = db.prepare("DELETE FROM instances WHERE status IN ('error', 'stopped') AND createdAt < ?");
 const stmtGetAll = db.prepare("SELECT * FROM instances");
 const stmtDelete = db.prepare("DELETE FROM instances WHERE id = ?");
 const stmtCount = db.prepare("SELECT COUNT(*) as count FROM instances");
@@ -116,6 +126,21 @@ export function dbGetInstance(id: string): Instance | undefined {
 export function dbGetInstanceByUserId(userId: string): Instance | undefined {
   const row = stmtGetByUserId.get(userId) as Record<string, unknown> | undefined;
   return row ? rowToInstance(row) : undefined;
+}
+
+export function dbGetInstanceByUserIdActive(userId: string): Instance | undefined {
+  const row = stmtGetByUserIdActive.get(userId) as Record<string, unknown> | undefined;
+  return row ? rowToInstance(row) : undefined;
+}
+
+export function dbGetOrphanedInstances(): Instance[] {
+  const rows = stmtGetOrphaned.all() as Record<string, unknown>[];
+  return rows.map(rowToInstance);
+}
+
+export function dbDeleteOldStaleInstances(cutoffISO: string): number {
+  const result = stmtDeleteOldStale.run(cutoffISO);
+  return result.changes;
 }
 
 export function dbGetAllInstances(): Instance[] {

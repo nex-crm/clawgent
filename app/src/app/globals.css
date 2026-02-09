@@ -850,11 +850,31 @@ body::after {
   display: none;
 }
 
-/* Cell active/hovered state — flat color, no gradients */
+/*
+ * Cell hover state — subtle "I see you" feedback.
+ * Border brightens toward the accent color at low opacity.
+ * No brackets, no glow — just enough to say "this is interactive".
+ */
+.sf2-cell[data-hovered="true"] {
+  border-color: color-mix(in srgb, var(--sf2-cell-color, var(--arcade-yellow)) 30%, #3838a0);
+  background: #0c0c34;
+  z-index: 1;
+}
+
+/* Cell active state (hovered or kb-focused) — name + bar treatment */
 .sf2-cell[data-active="true"] {
-  border-color: var(--sf2-cell-color, var(--arcade-yellow));
   background: #10103a;
   z-index: 2;
+}
+
+/* Active but NOT pinned: use the subtle hover border, not full accent */
+.sf2-cell[data-active="true"]:not([data-pinned="true"]) {
+  border-color: color-mix(in srgb, var(--sf2-cell-color, var(--arcade-yellow)) 30%, #3838a0);
+}
+
+/* Active AND pinned: full accent border */
+.sf2-cell[data-active="true"][data-pinned="true"] {
+  border-color: var(--sf2-cell-color, var(--arcade-yellow));
 }
 
 /* Portrait area — top portion of cell, holds sprite or emoji */
@@ -938,14 +958,24 @@ body::after {
   }
 }
 
-.sf2-cell[data-active="true"] .sf2-cell-name {
+/* Hover-only name label — slightly brighter, subtle accent hint */
+.sf2-cell[data-hovered="true"] .sf2-cell-name,
+.sf2-cell[data-active="true"]:not([data-pinned="true"]) .sf2-cell-name {
+  color: rgba(255, 255, 255, 0.6);
+  text-shadow: 1px 1px 0 #000;
+  background: #080824;
+  border-top-color: color-mix(in srgb, var(--sf2-cell-color, var(--arcade-yellow)) 30%, #3838a0);
+}
+
+/* Pinned name label — full accent color treatment */
+.sf2-cell[data-pinned="true"] .sf2-cell-name {
   color: var(--sf2-cell-color, var(--arcade-yellow));
   text-shadow: 1px 1px 0 #000;
   background: #0a0a2a;
   border-top-color: var(--sf2-cell-color, var(--arcade-yellow));
 }
 
-/* Active cell bottom color bar indicator — instant show, no transition */
+/* Bottom color bar indicator — instant show, no transition */
 .sf2-cell-bar {
   position: absolute;
   bottom: 0;
@@ -957,8 +987,16 @@ body::after {
   z-index: 3;
 }
 
-.sf2-cell[data-active="true"] .sf2-cell-bar {
+/* Bar shows at reduced opacity on hover, full on pinned */
+.sf2-cell[data-hovered="true"] .sf2-cell-bar,
+.sf2-cell[data-active="true"]:not([data-pinned="true"]) .sf2-cell-bar {
   transform: scaleX(1);
+  opacity: 0.35;
+}
+
+.sf2-cell[data-pinned="true"] .sf2-cell-bar {
+  transform: scaleX(1);
+  opacity: 1;
 }
 
 /*
@@ -970,10 +1008,9 @@ body::after {
   background: #080028;
   border: 4px solid var(--sf2-preview-color, var(--arcade-yellow));
   position: relative;
-  height: 480px;
+  min-height: 320px;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 @media (min-width: 768px) {
@@ -992,12 +1029,9 @@ body::after {
 /* Preview content area */
 .sf2-preview-body {
   padding: 1.25rem;
-  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  overflow-y: auto;
-  min-height: 0;
 }
 
 /* Large persona icon in preview — flat, no filter */
@@ -1108,8 +1142,7 @@ body::after {
 }
 
 /*
- * SNES-authentic active cell blink.
- * CPS-1 hardware: hard 2-frame color swap, no smooth interpolation.
+ * CPS-1 hardware blink keyframes (kept for potential future use).
  * Border alternates between cell accent color and white.
  */
 @keyframes sf2-select-blink {
@@ -1117,8 +1150,22 @@ body::after {
   60%, 100% { border-color: #ffffff; }
 }
 
-.sf2-cell[data-active="true"] {
-  /* Solid accent border, no blink */
+/*
+ * Pinned cell — user clicked to lock this persona in the preview panel.
+ * Full accent border, persistent inner glow, solid cursor brackets.
+ * This is the "you picked me" state. Uses box-shadow to avoid layout shift.
+ */
+.sf2-cell[data-pinned="true"] {
+  border-color: var(--sf2-cell-color, var(--arcade-yellow));
+  box-shadow:
+    inset 0 0 12px color-mix(in srgb, var(--sf2-cell-color, var(--arcade-yellow)) 35%, transparent),
+    0 0 8px color-mix(in srgb, var(--sf2-cell-color, var(--arcade-yellow)) 25%, transparent);
+}
+
+/* Pinned cell cursor brackets: solid, no blink animation */
+.sf2-cell[data-pinned="true"] .sf2-cursor {
+  animation: none;
+  border-color: var(--sf2-cell-color, var(--arcade-yellow));
 }
 
 /* Screen title */
@@ -1528,7 +1575,122 @@ body::after {
   box-shadow: 0 0 4px var(--powerup-color, var(--arcade-green));
 }
 
-/* --- 14. Selection Styling ---------------------------------- */
+/* --- 14. Template Detail Modal ------------------------------ */
+
+/*
+ * Full-screen overlay + centered modal for viewing all skills
+ * on a persona template. CPS-1 rules: flat fills, sharp edges,
+ * no border-radius, no gradients.
+ */
+
+/* Overlay — dark scrim with CRT scanline hint */
+.template-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998; /* Below CRT scanlines (9999) but above everything else */
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  animation: template-modal-fade-in 0.15s ease-out;
+}
+
+@keyframes template-modal-fade-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+/* Modal container */
+.template-modal {
+  background: var(--arcade-bg-panel);
+  border: 4px solid var(--template-modal-color, var(--arcade-yellow));
+  width: 100%;
+  max-width: 32rem;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  animation: template-modal-in 0.2s ease-out;
+  box-shadow:
+    0 0 24px rgba(0, 0, 0, 0.6),
+    0 0 48px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes template-modal-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Top accent bar — same pattern as preview panel */
+.template-modal-accent {
+  height: 4px;
+  background: var(--template-modal-color, var(--arcade-yellow));
+  flex-shrink: 0;
+}
+
+/* Header — persona info + close button */
+.template-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 2px solid var(--arcade-border-color);
+}
+
+/* Close button — pixel-art ESC key */
+.template-modal-close {
+  font-family: var(--font-arcade);
+  font-size: 7px;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.3);
+  background: transparent;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  padding: 0.375rem 0.625rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.template-modal-close:hover {
+  color: rgba(255, 255, 255, 0.6);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.template-modal-close:active {
+  transform: scale(0.92);
+}
+
+/* Scrollable skill list */
+.template-modal-skills {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem 1.25rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+}
+
+/* Individual skill card */
+.template-skill-card {
+  padding: 0.75rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid var(--arcade-border-color);
+}
+
+.template-skill-card:hover {
+  border-color: color-mix(in srgb, var(--template-modal-color, var(--arcade-yellow)) 40%, var(--arcade-border-color));
+  background: rgba(0, 0, 0, 0.4);
+}
+
+/* --- 15. Selection Styling ---------------------------------- */
 ::selection {
   background: var(--arcade-yellow);
   color: #000000;
