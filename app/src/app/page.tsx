@@ -1526,7 +1526,7 @@ export default function Home() {
 
       {/* ═══════ TOP BAR (when logged in with real auth) ═══════ */}
       {isAuthenticated && authUser.email && (
-        <header className="border-b border-white/10 px-4 py-3">
+        <header className="border-b border-white/10 px-4 py-3 mt-[52px]">
           <div className="max-w-4xl mx-auto flex items-center justify-between">
             <div className="flex items-center gap-3">
               {authUser.profilePictureUrl && (

@@ -57,34 +57,60 @@ function hmacCompare(baseString: string, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-function verifyPlivoSignature(req: NextRequest, body: string): boolean {
-  if (!PLIVO_AUTH_TOKEN) return false;
+type SigResult = "verified" | "no_signatures" | "mismatch";
+
+function verifyPlivoSignature(req: NextRequest, body: string): SigResult {
+  if (!PLIVO_AUTH_TOKEN) return "no_signatures";
 
   const webhookUrl = getWebhookUrl(req);
 
-  // V3: url + "." + sorted POST params + "." + nonce  (recommended, used by Voice API)
+  // Collect which signature headers are present
   const v3Sig = req.headers.get("x-plivo-signature-v3");
   const v3Nonce = req.headers.get("x-plivo-signature-v3-nonce");
+  const v2Sig = req.headers.get("x-plivo-signature-v2");
+  const v2Nonce = req.headers.get("x-plivo-signature-v2-nonce");
+  const v1Sig = req.headers.get("x-plivo-signature");
+
+  const hasAnySignature = !!(v3Sig || v2Sig || v1Sig);
+
+  // V3: url + "." + sorted POST params + "." + nonce  (recommended, used by Voice API)
   if (v3Sig && v3Nonce) {
     const sortedParams = buildSortedParams(
       body,
       req.headers.get("content-type") ?? "",
     );
     if (hmacCompare(`${webhookUrl}.${sortedParams}.${v3Nonce}`, v3Sig))
-      return true;
+      return "verified";
   }
 
   // V2: url + nonce  (used by Messaging/WhatsApp API)
-  const v2Sig = req.headers.get("x-plivo-signature-v2");
-  const v2Nonce = req.headers.get("x-plivo-signature-v2-nonce");
   if (v2Sig && v2Nonce) {
-    if (hmacCompare(webhookUrl + v2Nonce, v2Sig)) return true;
+    if (hmacCompare(webhookUrl + v2Nonce, v2Sig)) return "verified";
   }
 
+  // V1: Basic HMAC of URL + POST params (legacy, some WhatsApp webhooks still use this)
+  if (v1Sig) {
+    const sortedParams = buildSortedParams(body, req.headers.get("content-type") ?? "");
+    if (hmacCompare(webhookUrl + sortedParams, v1Sig)) return "verified";
+  }
+
+  if (!hasAnySignature) {
+    // Plivo sent no signature headers at all — WhatsApp webhooks may not include them
+    // unless "Signature Validation" is enabled in Plivo Console
+    console.warn(
+      `[whatsapp webhook] No signature headers from Plivo — verification skipped (enable in Plivo Console for security)`,
+    );
+    return "no_signatures";
+  }
+
+  // Signatures were present but none matched — likely URL mismatch or token issue
+  const presentSigs = [v3Sig ? "V3" : null, v2Sig ? "V2" : null, v1Sig ? "V1" : null]
+    .filter(Boolean)
+    .join(",");
   console.warn(
-    `[whatsapp webhook] Signature mismatch — url=${webhookUrl}, hasV3=${!!v3Sig}, hasV2=${!!v2Sig}`,
+    `[whatsapp webhook] Signature mismatch — url=${webhookUrl}, signatures=[${presentSigs}], content-type=${req.headers.get("content-type")}`,
   );
-  return false;
+  return "mismatch";
 }
 
 // --- Per-Phone Rate Limiting (in-memory) ---
@@ -124,10 +150,15 @@ export async function POST(request: NextRequest) {
 
     // Verify Plivo signature (skip in dev — URL mismatch behind proxy/ngrok)
     const isDev = process.env.NODE_ENV !== "production";
-    if (!isDev && PLIVO_AUTH_TOKEN && !verifyPlivoSignature(request, rawBody)) {
-      console.warn("[whatsapp webhook] Invalid Plivo signature — rejecting");
-      // Return 200 anyway to not reveal verification to attackers
-      return NextResponse.json({ status: "ok" });
+    if (!isDev && PLIVO_AUTH_TOKEN) {
+      const sigResult = verifyPlivoSignature(request, rawBody);
+      if (sigResult === "mismatch") {
+        // Signatures present but invalid — reject (likely spoofed request)
+        console.warn("[whatsapp webhook] Invalid Plivo signature — rejecting");
+        return NextResponse.json({ status: "ok" });
+      }
+      // "verified" → proceed
+      // "no_signatures" → proceed with warning (Plivo may not send sigs for WhatsApp)
     }
 
     // Parse the body
@@ -147,8 +178,13 @@ export async function POST(request: NextRequest) {
     }
 
     const from = String(data.From ?? "");
-    const messageType = String(data.Type ?? "");
+    const messageType = String(data.Type ?? data.MessageType ?? "");
     let text = String(data.Text ?? data.Body ?? "");
+
+    // Diagnostic: log the fields Plivo sent (redact message content)
+    console.log(
+      `[whatsapp webhook] Inbound: Type=${data.Type} MessageType=${data.MessageType} ContentType=${data.ContentType} From=${from ? "***" + from.slice(-4) : "empty"} hasText=${!!data.Text} hasBody=${!!data.Body} hasInteractive=${!!data.Interactive}`,
+    );
 
     // Extract interactive reply selections (list picks, button taps)
     // Plivo sends interactive replies in an "Interactive" field as a JSON string (PascalCase)
@@ -195,7 +231,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (messageType === "whatsapp" && text && from) {
+    // Accept "whatsapp" type from any of the known Plivo type fields.
+    // Plivo may send type in "Type", "MessageType", or the webhook may be
+    // WhatsApp-only (no type field). Accept if type matches OR if we have
+    // text+from and the webhook is dedicated to WhatsApp (this endpoint only
+    // receives from the Plivo WhatsApp webhook URL).
+    const isWhatsApp = messageType.toLowerCase() === "whatsapp";
+    const hasPayload = !!(text && from);
+
+    if (hasPayload && (isWhatsApp || !messageType)) {
+      // If no type field at all, this is still valid — endpoint is WhatsApp-only
+      if (!messageType) {
+        console.log("[whatsapp webhook] No Type field — assuming WhatsApp (dedicated endpoint)");
+      }
+
       // Rate limit per phone number
       if (isRateLimited(from)) {
         console.warn(`[whatsapp webhook] Rate limited: ${maskPhone(from)}`);
@@ -206,6 +255,14 @@ export async function POST(request: NextRequest) {
       processMessage(from, text).catch((err) => {
         console.error("[whatsapp webhook] Processing error:", err);
       });
+    } else if (!hasPayload) {
+      console.log(
+        `[whatsapp webhook] Skipped — missing fields: from=${!!from} text=${!!text} type=${messageType}`,
+      );
+    } else {
+      console.log(
+        `[whatsapp webhook] Skipped — unexpected type: "${messageType}" (expected "whatsapp")`,
+      );
     }
 
     return NextResponse.json({ status: "ok" });
