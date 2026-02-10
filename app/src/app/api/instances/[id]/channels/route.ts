@@ -226,7 +226,7 @@ export async function POST(
 
     // Track channel connected (server-side)
     const posthog = getPostHogClient();
-    posthog.capture({
+    posthog?.capture({
       distinctId: userId,
       event: 'channel_connected',
       properties: {

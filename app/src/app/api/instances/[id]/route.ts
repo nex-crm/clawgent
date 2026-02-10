@@ -90,7 +90,7 @@ export async function DELETE(
 
     // Track instance destroyed (server-side)
     const posthog = getPostHogClient();
-    posthog.capture({
+    posthog?.capture({
       distinctId: userId,
       event: 'instance_destroyed',
       properties: {

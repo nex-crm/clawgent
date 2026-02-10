@@ -254,7 +254,7 @@ async function deployInstance(
 
       // Track successful deployment (server-side)
       const posthog = getPostHogClient();
-      posthog.capture({
+      posthog?.capture({
         distinctId: instance.userId ?? 'anonymous',
         event: 'instance_deployed',
         properties: {
@@ -275,7 +275,7 @@ async function deployInstance(
 
       // Track failed deployment (server-side)
       const posthog = getPostHogClient();
-      posthog.capture({
+      posthog?.capture({
         distinctId: instance.userId ?? 'anonymous',
         event: 'instance_deployment_failed',
         properties: {
@@ -304,7 +304,7 @@ async function deployInstance(
 
     // Track failed deployment (server-side)
     const posthog = getPostHogClient();
-    posthog.capture({
+    posthog?.capture({
       distinctId: instance.userId ?? 'anonymous',
       event: 'instance_deployment_failed',
       properties: {

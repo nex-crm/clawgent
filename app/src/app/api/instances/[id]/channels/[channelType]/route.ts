@@ -119,7 +119,7 @@ export async function DELETE(
 
     // Track channel disconnected (server-side)
     const posthog = getPostHogClient();
-    posthog.capture({
+    posthog?.capture({
       distinctId: userId,
       event: 'channel_disconnected',
       properties: {

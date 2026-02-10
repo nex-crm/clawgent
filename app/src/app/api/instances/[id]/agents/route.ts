@@ -215,7 +215,7 @@ export async function POST(
 
     // Track agent added (server-side)
     const posthog = getPostHogClient();
-    posthog.capture({
+    posthog?.capture({
       distinctId: userId,
       event: 'agent_added',
       properties: {
