@@ -362,17 +362,24 @@ export function runCommandSilent(cmd: string, args: string[]): Promise<string> {
 // ─── Pairing Auto-Approver ───────────────────────────────────────
 // Runs in background for each active instance, approving device
 // pairing requests so browser connections work without manual approval.
-// Tracked by Set to avoid duplicates across reconciliation cycles.
+// Tracked by Map to avoid duplicates and support fast-mode re-entry
+// when the user visits the instance page.
 
-const activeApprovers = new Set<string>();
+const activeApprovers = new Map<string, { lastVisit: number }>();
 
 export function startPairingAutoApprover(instance: Instance): void {
-  if (activeApprovers.has(instance.id)) return;
-  activeApprovers.add(instance.id);
+  const existing = activeApprovers.get(instance.id);
+  if (existing) {
+    // Already running — bump lastVisit so it switches back to fast polling
+    existing.lastVisit = Date.now();
+    return;
+  }
 
-  const start = Date.now();
-  const FAST_INTERVAL = 1000;  // 1s for first 30s
-  const SLOW_INTERVAL = 5000;  // 5s after
+  const state = { lastVisit: Date.now() };
+  activeApprovers.set(instance.id, state);
+
+  const FAST_INTERVAL = 1000;  // 1s for 30s after last visit
+  const SLOW_INTERVAL = 5000;  // 5s otherwise
 
   async function checkAndApprove(): Promise<void> {
     if (!instances.has(instance.id) || instances.get(instance.id)?.status !== "running") {
@@ -381,34 +388,60 @@ export function startPairingAutoApprover(instance: Instance): void {
     }
 
     try {
-      const pendingJson = await runCommandSilent("docker", [
+      // Read pending requests directly from the filesystem.
+      // We avoid the `openclaw devices approve` CLI because it connects via
+      // WebSocket to the running gateway, which hangs indefinitely.
+      const approved = await runCommandSilent("docker", [
         "exec", instance.containerName,
-        "cat", "/home/node/.openclaw/devices/pending.json",
+        "node", "-e", `
+          const fs = require('fs');
+          const DEVICES = '/home/node/.openclaw/devices';
+          const pendingPath = DEVICES + '/pending.json';
+          const pairedPath = DEVICES + '/paired.json';
+          try { fs.mkdirSync(DEVICES, { recursive: true }); } catch {}
+          let pending = {};
+          try { pending = JSON.parse(fs.readFileSync(pendingPath, 'utf8')); } catch { process.exit(0); }
+          const ids = Object.keys(pending);
+          if (ids.length === 0) { process.exit(0); }
+          let paired = {};
+          try { paired = JSON.parse(fs.readFileSync(pairedPath, 'utf8')); } catch {}
+          for (const entry of Object.values(pending)) {
+            paired[entry.deviceId] = {
+              deviceId: entry.deviceId,
+              publicKey: entry.publicKey,
+              platform: entry.platform,
+              clientId: entry.clientId,
+              clientMode: entry.clientMode,
+              role: entry.role,
+              roles: entry.roles,
+              scopes: entry.scopes,
+              approvedAt: Date.now(),
+            };
+          }
+          fs.writeFileSync(pairedPath, JSON.stringify(paired, null, 2));
+          fs.writeFileSync(pendingPath, JSON.stringify({}, null, 2));
+          console.log(ids.length);
+        `,
       ]);
 
-      const pending = JSON.parse(pendingJson);
-      const requestIds = Object.keys(pending);
-
-      for (const requestId of requestIds) {
+      if (approved.trim() && parseInt(approved.trim(), 10) > 0) {
+        // Signal gateway to reload so it picks up the newly paired devices
         try {
-          await runCommand("docker", [
-            "exec", instance.containerName,
-            "node", "/app/openclaw.mjs", "devices", "approve", requestId,
-            "--token", instance.token,
-            "--url", "ws://127.0.0.1:18789",
-            "--timeout", "5000",
+          await runCommandSilent("docker", [
+            "exec", instance.containerName, "kill", "-USR1", "1",
           ]);
         } catch {
-          // Approval may fail if request already expired
+          // Non-fatal
         }
       }
     } catch {
-      // Container not ready or pending.json doesn't exist
+      // Container not ready or devices dir doesn't exist yet
     }
 
-    // Schedule next check (fast for first 30s, then slow)
+    // Schedule next check — fast for 30s after most recent visit, then slow
     if (!activeApprovers.has(instance.id)) return;
-    const delay = Date.now() - start < 30000 ? FAST_INTERVAL : SLOW_INTERVAL;
+    const sinceVisit = Date.now() - state.lastVisit;
+    const delay = sinceVisit < 30000 ? FAST_INTERVAL : SLOW_INTERVAL;
     const timer = setTimeout(checkAndApprove, delay);
     if (timer && typeof timer === "object" && "unref" in timer) timer.unref();
   }
