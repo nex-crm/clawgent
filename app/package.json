@@ -13,6 +13,8 @@
     "@workos-inc/authkit-nextjs": "^2.13.0",
     "better-sqlite3": "^12.6.2",
     "next": "16.1.6",
+    "posthog-js": "^1.345.0",
+    "posthog-node": "^5.24.14",
     "react": "19.2.3",
     "react-dom": "19.2.3"
   },

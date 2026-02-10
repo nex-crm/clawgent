@@ -5,6 +5,7 @@ import { tmpdir } from "os";
 import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
 import { instances, runCommand, runCommandSilent, reconcileWithDocker } from "@/lib/instances";
 import { type ChannelType, CHANNEL_TYPES } from "@/lib/channels";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 const OPENCLAW_CONFIG_PATH = "/home/node/.openclaw/openclaw.json";
 
@@ -115,6 +116,17 @@ export async function DELETE(
     } catch {
       // Non-fatal: gateway will pick up config on next restart
     }
+
+    // Track channel disconnected (server-side)
+    const posthog = getPostHogClient();
+    posthog.capture({
+      distinctId: userId,
+      event: 'channel_disconnected',
+      properties: {
+        instance_id: id,
+        channel_type: channelType,
+      },
+    });
 
     return NextResponse.json({
       type: channelType,

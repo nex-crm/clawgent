@@ -44,6 +44,6 @@ export default async function middleware(req: NextRequest, event: NextFetchEvent
 export const config = {
   matcher: [
     // Match all paths except static assets and Next.js internals
-    "/((?!_next/static|_next/image|favicon.ico|sounds/|sprites/).*)",
+    "/((?!_next/static|_next/image|favicon.ico|sounds/|sprites/|ingest/).*)",
   ],
 };

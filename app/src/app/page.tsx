@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, memo } from "react";
+import posthog from "posthog-js";
 import { PERSONA_CONFIGS } from "../lib/personas";
 import { useAuthSafe } from "../lib/use-auth-safe";
 import { getSignInUrlAction, signOutAction } from "./actions/auth";
@@ -990,11 +991,23 @@ export default function Home() {
     prevLogCountRef.current = logCount;
   }, [activeInstance?.logs.length]);
 
+  // ─── PostHog user identification ──────────────────────────────
+  useEffect(() => {
+    if (authUser && authUser.id) {
+      posthog.identify(authUser.id, {
+        email: authUser.email,
+        firstName: authUser.firstName,
+        lastName: authUser.lastName,
+      });
+    }
+  }, [authUser]);
+
   // ─── Actions ──────────────────────────────────────────────────
 
   async function handleSignIn() {
     ArcadeSounds.signIn();
     setSigningIn(true);
+    posthog.capture('sign_in_started');
     try {
       const url = await getSignInUrlAction();
       window.location.href = url;
@@ -1005,11 +1018,19 @@ export default function Home() {
 
   async function handleSignOut() {
     ArcadeSounds.signOut();
+    posthog.capture('sign_out_completed');
+    posthog.reset();
     await signOutAction();
   }
 
   function handlePersonaSelect(persona: Persona) {
     ArcadeSounds.select();
+    posthog.capture('persona_selected', {
+      persona_id: persona.id,
+      persona_name: persona.name,
+      recommended_model: persona.recommendedModel,
+      skill_count: persona.skills.length,
+    });
     setSelectedPersona(persona);
     setPinnedPersona(null);
     setSelectedProvider("anthropic");
@@ -1030,6 +1051,15 @@ export default function Home() {
     if (!apiKey.trim()) return;
 
     ArcadeSounds.deployStart();
+
+    // Track deployment started (conversion event)
+    posthog.capture('deployment_started', {
+      provider: selectedProvider,
+      persona_id: selectedPersona?.id ?? null,
+      persona_name: selectedPersona?.name ?? null,
+      has_channels: Object.keys(setupChannels).length > 0,
+      channel_types: Object.keys(setupChannels),
+    });
 
     // Reset animation state
     setShowLaunchFlash(false);
@@ -1269,6 +1299,11 @@ export default function Home() {
 
   const handleViewAllSkills = useCallback((persona: Persona) => {
     ArcadeSounds.select();
+    posthog.capture('persona_detail_viewed', {
+      persona_id: persona.id,
+      persona_name: persona.name,
+      skill_count: persona.skills.length,
+    });
     setTemplateModalPersona(persona);
   }, []);
 
@@ -1686,7 +1721,14 @@ export default function Home() {
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   onMouseEnter={() => ArcadeSounds.buttonHover()}
-                                  onClick={() => ArcadeSounds.buttonClick()}
+                                  onClick={() => {
+                                    ArcadeSounds.buttonClick();
+                                    posthog.capture('agent_session_opened', {
+                                      agent_id: agent.agentId,
+                                      agent_name: agent.name,
+                                      persona: agent.persona,
+                                    });
+                                  }}
                                   className="agent-card-open-btn pixel-font text-[7px] px-2.5 py-1.5 transition-all"
                                   style={{
                                     color: colorToCssVar(accentColor),
@@ -2002,7 +2044,13 @@ export default function Home() {
                       target="_blank"
                       rel="noopener noreferrer"
                       onMouseEnter={() => ArcadeSounds.buttonHover()}
-                      onClick={() => ArcadeSounds.buttonClick()}
+                      onClick={() => {
+                        ArcadeSounds.buttonClick();
+                        posthog.capture('dashboard_opened', {
+                          instance_id: userInstance.id,
+                          provider: userInstance.provider,
+                        });
+                      }}
                       className="pixel-font text-[9px] text-arcade-green border border-arcade-green/40 px-4 py-2 hover:bg-arcade-green/10 hover:border-arcade-green transition-all cursor-pointer"
                     >
                       OPEN DASHBOARD
@@ -2581,7 +2629,13 @@ export default function Home() {
                       target="_blank"
                       rel="noopener noreferrer"
                       onMouseEnter={() => ArcadeSounds.buttonHover()}
-                      onClick={() => ArcadeSounds.buttonClick()}
+                      onClick={() => {
+                        ArcadeSounds.buttonClick();
+                        posthog.capture('dashboard_opened', {
+                          instance_id: activeInstance.id,
+                          provider: activeInstance.provider,
+                        });
+                      }}
                       className="pixel-font text-xs bg-arcade-green text-black py-4 px-8 border-2 border-arcade-green hover:shadow-[0_0_20px_var(--arcade-green)] hover:scale-105 transition-all duration-200 cursor-pointer"
                     >
                       OPEN DASHBOARD

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
 import { instances, destroyInstance, reconcileWithDocker } from "@/lib/instances";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 export async function GET(
   _request: Request,
@@ -80,7 +81,26 @@ export async function DELETE(
   }
 
   try {
+    // Capture instance info before destroying
+    const provider = instance.provider;
+    const persona = instance.persona;
+    const createdAt = instance.createdAt;
+
     await destroyInstance(id);
+
+    // Track instance destroyed (server-side)
+    const posthog = getPostHogClient();
+    posthog.capture({
+      distinctId: userId,
+      event: 'instance_destroyed',
+      properties: {
+        instance_id: id,
+        provider: provider,
+        persona: persona ?? null,
+        created_at: createdAt,
+      },
+    });
+
     return NextResponse.json({ message: "Instance destroyed", id });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Press_Start_2P, Inter } from "next/font/google";
+import { PostHogProvider } from "@/lib/posthog-client";
 import "./globals.css";
 
 const arcadeFont = Press_Start_2P({
@@ -62,7 +63,7 @@ export default async function RootLayout({
         ))}
       </head>
       <body className={`${arcadeFont.variable} ${inter.variable} antialiased`}>
-        {content}
+        <PostHogProvider>{content}</PostHogProvider>
       </body>
     </html>
   );

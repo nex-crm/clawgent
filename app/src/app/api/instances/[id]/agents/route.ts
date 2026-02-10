@@ -3,6 +3,7 @@ import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
 import { instances, runCommand, runCommandSilent, reconcileWithDocker } from "@/lib/instances";
 import { PERSONA_CONFIGS } from "@/lib/personas";
 import { configureAgentPersona } from "@/lib/agent-config";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 const MAIN_WORKSPACE = "/home/node/.openclaw/workspace";
 const AGENTS_BASE = "/home/node/.openclaw/agents";
@@ -211,6 +212,20 @@ export async function POST(
         // Non-critical: identity can be set manually
       }
     }
+
+    // Track agent added (server-side)
+    const posthog = getPostHogClient();
+    posthog.capture({
+      distinctId: userId,
+      event: 'agent_added',
+      properties: {
+        instance_id: id,
+        agent_id: agentName,
+        persona: personaId ?? null,
+        persona_name: persona?.name ?? null,
+        skill_count: persona?.skills.length ?? 0,
+      },
+    });
 
     return NextResponse.json({
       agentId: agentName,

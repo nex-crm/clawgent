@@ -7,6 +7,7 @@ import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
 import { instances, type Instance, runCommand, runCommandSilent, reconcileWithDocker, findInstanceByUserId, startPairingAutoApprover } from "@/lib/instances";
 import { PERSONA_CONFIGS } from "@/lib/personas";
 import { configureAgentPersona } from "@/lib/agent-config";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 const OPENCLAW_IMAGE = "clawgent-openclaw";
 const OPENCLAW_CONFIG_PATH = "/home/node/.openclaw/openclaw.json";
@@ -250,12 +251,40 @@ async function deployInstance(
       instance.dashboardUrl = `/i/${instance.id}/`;
       addLog(instance, `Your instance is live at /i/${instance.id}/ -- go check it out.`);
 
+      // Track successful deployment (server-side)
+      const posthog = getPostHogClient();
+      posthog.capture({
+        distinctId: instance.userId ?? 'anonymous',
+        event: 'instance_deployed',
+        properties: {
+          instance_id: instance.id,
+          provider: instance.provider,
+          model_id: modelId,
+          persona: instance.persona ?? null,
+          port: instance.port,
+        },
+      });
+
       // Start background auto-approver for device pairing requests.
       // OpenClaw requires device pairing even with --allow-unconfigured.
       startPairingAutoApprover(instance);
     } else {
       instance.status = "error";
       addLog(instance, "Instance gateway didn't respond in 60s. That's... not great. Check Docker logs.");
+
+      // Track failed deployment (server-side)
+      const posthog = getPostHogClient();
+      posthog.capture({
+        distinctId: instance.userId ?? 'anonymous',
+        event: 'instance_deployment_failed',
+        properties: {
+          instance_id: instance.id,
+          provider: instance.provider,
+          model_id: modelId,
+          persona: instance.persona ?? null,
+          error_reason: 'gateway_timeout',
+        },
+      });
 
       // Capture container logs for debugging
       try {
@@ -271,6 +300,21 @@ async function deployInstance(
     const message = err instanceof Error ? err.message : String(err);
     addLog(instance, `Error: ${message}`);
     instance.status = "error";
+
+    // Track failed deployment (server-side)
+    const posthog = getPostHogClient();
+    posthog.capture({
+      distinctId: instance.userId ?? 'anonymous',
+      event: 'instance_deployment_failed',
+      properties: {
+        instance_id: instance.id,
+        provider: instance.provider,
+        model_id: modelId,
+        persona: instance.persona ?? null,
+        error_reason: 'exception',
+        error_message: sanitizeMessage(message),
+      },
+    });
   }
 }
 

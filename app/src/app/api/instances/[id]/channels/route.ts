@@ -10,6 +10,7 @@ import {
   validateChannelConfig,
   buildChannelConfig,
 } from "@/lib/channels";
+import { getPostHogClient } from "@/lib/posthog-server";
 
 const OPENCLAW_CONFIG_PATH = "/home/node/.openclaw/openclaw.json";
 
@@ -206,6 +207,17 @@ export async function POST(
     } catch {
       // Non-fatal: gateway will pick up config on next restart
     }
+
+    // Track channel connected (server-side)
+    const posthog = getPostHogClient();
+    posthog.capture({
+      distinctId: userId,
+      event: 'channel_connected',
+      properties: {
+        instance_id: id,
+        channel_type: channelType,
+      },
+    });
 
     return NextResponse.json({
       type: channelType,
