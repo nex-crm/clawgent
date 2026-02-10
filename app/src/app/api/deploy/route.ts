@@ -270,6 +270,7 @@ async function deployInstance(
         distinctId: instance.userId ?? 'anonymous',
         event: 'instance_deployed',
         properties: {
+          source: "web",
           instance_id: instance.id,
           provider: instance.provider,
           model_id: modelId,
@@ -291,6 +292,7 @@ async function deployInstance(
         distinctId: instance.userId ?? 'anonymous',
         event: 'instance_deployment_failed',
         properties: {
+          source: "web",
           instance_id: instance.id,
           provider: instance.provider,
           model_id: modelId,
@@ -320,6 +322,7 @@ async function deployInstance(
       distinctId: instance.userId ?? 'anonymous',
       event: 'instance_deployment_failed',
       properties: {
+        source: "web",
         instance_id: instance.id,
         provider: instance.provider,
         model_id: modelId,
@@ -395,6 +398,7 @@ async function injectGatewayConfig(instance: Instance): Promise<void> {
     "https://clawgent.ai",
     "http://localhost:3001",
   ];
+  controlUi.allowInsecureAuth = true;
   gateway.controlUi = controlUi;
   config.gateway = gateway;
 
@@ -405,6 +409,11 @@ async function injectGatewayConfig(instance: Instance): Promise<void> {
     writeFileSync(configPath, JSON.stringify(config, null, 2));
     await runCommand("docker", [
       "cp", configPath, `${instance.containerName}:${OPENCLAW_CONFIG_PATH}`,
+    ]);
+    // Fix ownership — docker cp creates files as root
+    await runCommand("docker", [
+      "exec", "-u", "root", instance.containerName,
+      "chown", "node:node", OPENCLAW_CONFIG_PATH,
     ]);
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });

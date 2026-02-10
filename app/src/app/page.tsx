@@ -573,7 +573,7 @@ export default function Home() {
 
   // Screen state machine
   const [screen, setScreen] = useState<
-    "start" | "select" | "apikey" | "powerups" | "deploying"
+    "start" | "select" | "apikey" | "powerups" | "deploying" | "whatsapp"
   >("start");
   const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
   const [hoveredPersona, setHoveredPersona] = useState<Persona | null>(null);
@@ -998,6 +998,7 @@ export default function Home() {
         email: authUser.email,
         firstName: authUser.firstName,
         lastName: authUser.lastName,
+        source: "web",
       });
     }
   }, [authUser]);
@@ -1007,7 +1008,7 @@ export default function Home() {
   async function handleSignIn() {
     ArcadeSounds.signIn();
     setSigningIn(true);
-    posthog.capture('sign_in_started');
+    posthog.capture('sign_in_started', { source: "web" });
     try {
       const url = await getSignInUrlAction();
       window.location.href = url;
@@ -1018,7 +1019,7 @@ export default function Home() {
 
   async function handleSignOut() {
     ArcadeSounds.signOut();
-    posthog.capture('sign_out_completed');
+    posthog.capture('sign_out_completed', { source: "web" });
     posthog.reset();
     await signOutAction();
   }
@@ -1026,6 +1027,7 @@ export default function Home() {
   function handlePersonaSelect(persona: Persona) {
     ArcadeSounds.select();
     posthog.capture('persona_selected', {
+      source: "web",
       persona_id: persona.id,
       persona_name: persona.name,
       recommended_model: persona.recommendedModel,
@@ -1040,6 +1042,11 @@ export default function Home() {
 
   function handleStartFromScratch() {
     ArcadeSounds.select();
+    posthog.capture('persona_selected', {
+      source: "web",
+      persona_id: null,
+      persona_name: "scratch",
+    });
     setSelectedPersona(null);
     setPinnedPersona(null);
     setSelectedProvider("anthropic");
@@ -1054,6 +1061,7 @@ export default function Home() {
 
     // Track deployment started (conversion event)
     posthog.capture('deployment_started', {
+      source: "web",
       provider: selectedProvider,
       persona_id: selectedPersona?.id ?? null,
       persona_name: selectedPersona?.name ?? null,
@@ -1209,13 +1217,22 @@ export default function Home() {
     }, 1800);
   }, []);
 
+  const handleWhatsAppOption = useCallback(() => {
+    ArcadeSounds.select();
+    ArcadeSounds.screenTransition();
+    posthog.capture("whatsapp_option_clicked", { source: "web" });
+    setScreen("whatsapp");
+  }, []);
+
   const handleStartMenuSelect = useCallback(() => {
     if (startMenuIndex === 0) {
       handleDeployOption();
+    } else if (startMenuIndex === 1) {
+      handleWhatsAppOption();
     } else {
       handleStayIrrelevant();
     }
-  }, [startMenuIndex, handleDeployOption, handleStayIrrelevant]);
+  }, [startMenuIndex, handleDeployOption, handleWhatsAppOption, handleStayIrrelevant]);
 
   // Keyboard navigation for start menu
   useEffect(() => {
@@ -1224,12 +1241,12 @@ export default function Home() {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
         e.preventDefault();
-        setStartMenuIndex(0);
+        setStartMenuIndex((prev) => Math.max(0, prev - 1));
         setSnarkyMessage(null);
         ArcadeSounds.cursorMove();
       } else if (e.key === "ArrowDown" || e.key === "ArrowRight") {
         e.preventDefault();
-        setStartMenuIndex(1);
+        setStartMenuIndex((prev) => Math.min(2, prev + 1));
         setSnarkyMessage(null);
         ArcadeSounds.cursorMove();
       } else if (e.key === "Enter" || e.key === " ") {
@@ -1300,6 +1317,7 @@ export default function Home() {
   const handleViewAllSkills = useCallback((persona: Persona) => {
     ArcadeSounds.select();
     posthog.capture('persona_detail_viewed', {
+      source: "web",
       persona_id: persona.id,
       persona_name: persona.name,
       skill_count: persona.skills.length,
@@ -1436,6 +1454,29 @@ export default function Home() {
   return (
     <div className="min-h-screen flex flex-col">
       {/* ═══════ TOP-RIGHT UTILITY LINKS ═══════ */}
+      <a
+        href="mailto:support@nex.ai"
+        className="support-link"
+        title="Contact Support"
+        aria-label="Contact Support"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          xmlns="http://www.w3.org/2000/svg"
+          aria-hidden="true"
+        >
+          <rect x="2" y="4" width="20" height="16" rx="2" />
+          <path d="M22 4L12 13L2 4" />
+        </svg>
+        <span className="support-link-text">CONTACT SUPPORT</span>
+      </a>
       <a
         href="https://github.com/nex-crm/clawgent"
         target="_blank"
@@ -1592,15 +1633,33 @@ export default function Home() {
                   </span>
                 </button>
 
-                {/* Option 2: Stay Irrelevant */}
+                {/* Option 2: Try on WhatsApp */}
                 <button
-                  onClick={() => { setStartMenuIndex(1); handleStayIrrelevant(); }}
+                  onClick={() => { setStartMenuIndex(1); handleWhatsAppOption(); }}
                   onMouseEnter={() => { setStartMenuIndex(1); setSnarkyMessage(null); ArcadeSounds.cursorMove(); }}
-                  className={`start-menu-option ${nopeShake && startMenuIndex === 1 ? "nope-shake" : ""}`}
+                  className="start-menu-option"
                   data-active={startMenuIndex === 1}
-                  data-variant="danger"
+                  data-variant="whatsapp"
                 >
                   {startMenuIndex === 1 ? (
+                    <span className="start-menu-arrow" aria-hidden="true">{"\u25B6"}</span>
+                  ) : (
+                    <span className="start-menu-arrow-spacer" aria-hidden="true" />
+                  )}
+                  <span className="pixel-font text-[10px] sm:text-xs tracking-wider">
+                    TRY ON WHATSAPP
+                  </span>
+                </button>
+
+                {/* Option 3: Stay Irrelevant */}
+                <button
+                  onClick={() => { setStartMenuIndex(2); handleStayIrrelevant(); }}
+                  onMouseEnter={() => { setStartMenuIndex(2); setSnarkyMessage(null); ArcadeSounds.cursorMove(); }}
+                  className={`start-menu-option ${nopeShake && startMenuIndex === 2 ? "nope-shake" : ""}`}
+                  data-active={startMenuIndex === 2}
+                  data-variant="danger"
+                >
+                  {startMenuIndex === 2 ? (
                     <span className="start-menu-arrow" aria-hidden="true">{"\u25B6"}</span>
                   ) : (
                     <span className="start-menu-arrow-spacer" aria-hidden="true" />
@@ -1724,6 +1783,7 @@ export default function Home() {
                                   onClick={() => {
                                     ArcadeSounds.buttonClick();
                                     posthog.capture('agent_session_opened', {
+                                      source: "web",
                                       agent_id: agent.agentId,
                                       agent_name: agent.name,
                                       persona: agent.persona,
@@ -2047,6 +2107,7 @@ export default function Home() {
                       onClick={() => {
                         ArcadeSounds.buttonClick();
                         posthog.capture('dashboard_opened', {
+                          source: "web",
                           instance_id: userInstance.id,
                           provider: userInstance.provider,
                         });
@@ -2124,6 +2185,88 @@ export default function Home() {
                 RUNNING
               </p>
             )}
+          </div>
+        )}
+
+        {/* ─── SCREEN: WHATSAPP INFO ─── */}
+        {!isLoading && screen === "whatsapp" && (
+          <div className="flex flex-col items-center justify-center gap-8 text-center sf2-wipe-in max-w-lg mx-auto px-4">
+            {/* WhatsApp-themed arcade panel */}
+            <div
+              className="w-full arcade-panel whatsapp-panel"
+              style={{ borderColor: "var(--arcade-green)" }}
+            >
+              {/* Green accent bar */}
+              <div className="h-1.5" style={{ background: "var(--arcade-green)" }} />
+
+              <div className="p-6 sm:p-8 space-y-6">
+                {/* Icon + Title */}
+                <div className="space-y-3">
+                  <div className="text-4xl sm:text-5xl" aria-hidden="true">
+                    {"\uD83D\uDCAC"}
+                  </div>
+                  <h2 className="pixel-font text-arcade-green text-sm sm:text-base tracking-widest arcade-text">
+                    OPENCLAW ON WHATSAPP
+                  </h2>
+                  <p className="pixel-font text-white/50 text-[8px] sm:text-[9px] tracking-wider leading-relaxed">
+                    SAME AGENTS. SAME POWER. NO BROWSER REQUIRED.
+                  </p>
+                </div>
+
+                {/* Divider */}
+                <div className="border-t border-arcade-green/20" />
+
+                {/* Phone number display */}
+                <div className="space-y-2">
+                  <p className="pixel-font text-white/30 text-[7px] tracking-widest uppercase">
+                    MESSAGE THIS NUMBER
+                  </p>
+                  <p className="pixel-font text-arcade-green text-base sm:text-lg tracking-wider arcade-text">
+                    +1 (555) 845-2872
+                  </p>
+                </div>
+
+                {/* CTA Button */}
+                <a
+                  href="https://wa.me/15558452872?text=Hi.%20I%20want%20to%20deploy%20OpenClaw%20to%20WhatsApp"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="whatsapp-cta-btn block w-full"
+                  onClick={() => {
+                    ArcadeSounds.buttonClick();
+                    posthog.capture("whatsapp_chat_opened", { source: "web" });
+                  }}
+                  onMouseEnter={() => ArcadeSounds.buttonHover()}
+                >
+                  <span className="pixel-font text-[9px] sm:text-[10px] tracking-wider">
+                    OPEN WHATSAPP CHAT
+                  </span>
+                </a>
+
+                {/* Subtext */}
+                <div className="space-y-1">
+                  <p className="pixel-font text-white/20 text-[7px] tracking-wider">
+                    NO SIGN-UP. NO API KEY. JUST TEXT &quot;HEY&quot;.
+                  </p>
+                  <p className="pixel-font text-white/15 text-[6px] tracking-wider">
+                    YOUR COMPETITORS ARE STILL READING DOCS.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Back button */}
+            <button
+              onClick={() => {
+                ArcadeSounds.back();
+                ArcadeSounds.screenTransition();
+                setScreen("start");
+              }}
+              onMouseEnter={() => ArcadeSounds.buttonHover()}
+              className="pixel-font text-[8px] text-white/30 hover:text-white/60 tracking-wider cursor-pointer transition-colors"
+            >
+              {"\u25C0"} BACK TO MENU
+            </button>
           </div>
         )}
 
@@ -2632,6 +2775,7 @@ export default function Home() {
                       onClick={() => {
                         ArcadeSounds.buttonClick();
                         posthog.capture('dashboard_opened', {
+                          source: "web",
                           instance_id: activeInstance.id,
                           provider: activeInstance.provider,
                         });

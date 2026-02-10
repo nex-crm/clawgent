@@ -94,6 +94,7 @@ export async function DELETE(
       distinctId: userId,
       event: 'instance_destroyed',
       properties: {
+        source: "web",
         instance_id: id,
         provider: provider,
         persona: persona ?? null,

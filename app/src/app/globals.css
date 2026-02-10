@@ -494,7 +494,48 @@ body::after {
 /* --- 9. Sound Mute Toggle Button -------------------------- */
 
 /*
- * Fixed top-right Discord invite link. Matches mute button style
+ * Fixed top-right support email link with text label.
+ * Matches github-link / discord-link style exactly, just wider for text.
+ */
+.support-link {
+  position: fixed;
+  top: 12px;
+  right: 144px;
+  z-index: 10000;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 2px solid var(--arcade-border-color);
+  color: rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  padding: 0 10px;
+  border-radius: 0;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.support-link-text {
+  font-family: var(--font-pixel), monospace;
+  font-size: 7px;
+  letter-spacing: 0.08em;
+}
+
+.support-link:hover {
+  border-color: #fff;
+  background: rgba(0, 0, 0, 0.8);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.support-link:active {
+  transform: scale(0.92);
+}
+
+/*
+ * Fixed top-right GitHub link. Matches mute button style
  * but subtler — utility link, not a CTA.
  */
 .github-link {
@@ -731,6 +772,15 @@ body::after {
   box-shadow:
     0 0 12px rgba(248, 216, 56, 0.15),
     inset 0 0 16px rgba(248, 216, 56, 0.03);
+}
+
+.start-menu-option[data-active="true"][data-variant="whatsapp"] {
+  border-color: var(--arcade-green);
+  color: var(--arcade-green);
+  background: rgba(56, 200, 48, 0.04);
+  box-shadow:
+    0 0 12px rgba(56, 200, 48, 0.15),
+    inset 0 0 16px rgba(56, 200, 48, 0.03);
 }
 
 .start-menu-option[data-active="true"][data-variant="danger"] {
@@ -1720,7 +1770,80 @@ body::after {
   background: rgba(0, 0, 0, 0.4);
 }
 
-/* --- 15. Selection Styling ---------------------------------- */
+/* --- 15. WhatsApp Info Screen ------------------------------- */
+
+/*
+ * WhatsApp info panel — green-accented arcade panel.
+ * Same CPS-1 rules: flat fills, sharp edges, no radius.
+ */
+.whatsapp-panel {
+  border: 3px solid var(--arcade-green);
+  box-shadow:
+    0 0 12px rgba(56, 200, 48, 0.1),
+    inset 0 0 20px rgba(0, 0, 0, 0.6);
+}
+
+/* WhatsApp CTA — green arcade button, coin-insert energy */
+.whatsapp-cta-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.875rem 1.5rem;
+  color: var(--arcade-green);
+  background: transparent;
+  border: 3px solid var(--arcade-green);
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  text-decoration: none;
+  text-align: center;
+  transition: all 0.15s ease;
+}
+
+.whatsapp-cta-btn:hover {
+  background: rgba(56, 200, 48, 0.08);
+  box-shadow:
+    0 0 12px var(--arcade-green),
+    0 0 24px rgba(56, 200, 48, 0.3),
+    inset 0 0 12px rgba(56, 200, 48, 0.05);
+  transform: scale(1.02);
+  text-shadow: 0 0 6px var(--arcade-green);
+}
+
+.whatsapp-cta-btn:active {
+  transform: scale(0.98);
+}
+
+/* Animated shine sweep — same pattern as add-agent-btn */
+.whatsapp-cta-btn::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(56, 200, 48, 0.12),
+    transparent
+  );
+  animation: whatsapp-shine 3s ease-in-out infinite;
+}
+
+@keyframes whatsapp-shine {
+  0% {
+    left: -100%;
+  }
+  50% {
+    left: 150%;
+  }
+  100% {
+    left: 150%;
+  }
+}
+
+/* --- 16. Selection Styling ---------------------------------- */
 ::selection {
   background: var(--arcade-yellow);
   color: #000000;

@@ -33,13 +33,17 @@ export default async function middleware(req: NextRequest, event: NextFetchEvent
           "/auth/callback",
           // OpenClaw proxy paths — must remain accessible after initial auth redirect
           "/i/:path*",
+          // WhatsApp webhook — Plivo sends inbound messages here (no auth)
+          "/api/whatsapp/webhook",
         ],
       },
     });
   }
 
   // CSRF: verify Origin header on state-changing requests
-  if (["POST", "PUT", "DELETE", "PATCH"].includes(req.method)) {
+  // Skip CSRF for WhatsApp webhook — Plivo POSTs won't have a matching Origin
+  const isWhatsAppWebhook = req.nextUrl.pathname === "/api/whatsapp/webhook";
+  if (!isWhatsAppWebhook && ["POST", "PUT", "DELETE", "PATCH"].includes(req.method)) {
     const origin = req.headers.get("origin");
     const host = req.headers.get("host") || "";
     if (origin) {
