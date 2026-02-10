@@ -2222,13 +2222,13 @@ export default function Home() {
                     MESSAGE THIS NUMBER
                   </p>
                   <p className="pixel-font text-arcade-green text-base sm:text-lg tracking-wider arcade-text">
-                    +1 (555) 899-1616
+                    +1 (555) 845-2872
                   </p>
                 </div>
 
                 {/* CTA Button */}
                 <a
-                  href="https://wa.me/15558991616?text=Hi.%20I%20want%20to%20deploy%20OpenClaw%20to%20WhatsApp"
+                  href="https://wa.me/15558452872?text=Hi.%20I%20want%20to%20deploy%20OpenClaw%20to%20WhatsApp"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="whatsapp-cta-btn block w-full"

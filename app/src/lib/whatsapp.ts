@@ -28,7 +28,7 @@ import { tmpdir } from "os";
 
 const PLIVO_AUTH_ID = process.env.PLIVO_AUTH_ID ?? "";
 const PLIVO_AUTH_TOKEN = process.env.PLIVO_AUTH_TOKEN ?? "";
-const PLIVO_WHATSAPP_NUMBER = process.env.PLIVO_WHATSAPP_NUMBER ?? "15558991616";
+const PLIVO_WHATSAPP_NUMBER = process.env.PLIVO_WHATSAPP_NUMBER ?? "15558452872"; // old number until new one is approved
 const PLIVO_API_URL = "https://api.plivo.com/v1";
 
 const OPENCLAW_IMAGE = "clawgent-openclaw";
@@ -160,7 +160,7 @@ type PlivoInteractive = PlivoInteractiveList | PlivoInteractiveButton;
 function buildPersonaListInteractive(): PlivoInteractiveList {
   return {
     type: "list",
-    header: { type: "text", text: "welcome to clawgent" },
+    header: { type: "text", text: "welcome to clawgent by nex.ai" },
     body: {
       text: "yo, i deploy AI agents that actually do stuff.\nmarketing, sales, dev, ops -- pick your agent.\n\nlet's get you set up. takes about 60 seconds.",
     },
