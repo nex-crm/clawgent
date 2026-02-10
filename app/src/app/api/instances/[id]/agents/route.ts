@@ -52,7 +52,7 @@ export async function GET(
   if (!instance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 });
   }
-  if (instance.userId && instance.userId !== userId) {
+  if (instance.userId !== userId) {
     return NextResponse.json(
       { error: "You can only view agents on your own instance" },
       { status: 403 },
@@ -118,9 +118,9 @@ export async function GET(
 
     return NextResponse.json({ agents: result });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[api] Error listing agents for instance ${id}:`, err);
     return NextResponse.json(
-      { error: `Failed to list agents: ${message}` },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }
@@ -156,7 +156,7 @@ export async function POST(
   if (!instance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 });
   }
-  if (instance.userId && instance.userId !== userId) {
+  if (instance.userId !== userId) {
     return NextResponse.json(
       { error: "You can only add agents to your own instance" },
       { status: 403 },
@@ -236,9 +236,9 @@ export async function POST(
       status: personaId ? "configured" : "created",
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[api] Error adding agent to instance ${id}:`, err);
     return NextResponse.json(
-      { error: `Failed to add agent: ${message}` },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }

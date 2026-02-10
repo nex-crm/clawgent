@@ -47,6 +47,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Global instance cap to prevent resource exhaustion
+    const MAX_INSTANCES = 20;
+    const runningCount = [...instances.values()].filter(i => i.status === "running" || i.status === "starting").length;
+    if (runningCount >= MAX_INSTANCES) {
+      return NextResponse.json(
+        { error: "Platform capacity reached. Please try again later." },
+        { status: 503 }
+      );
+    }
+
     const body = await request.json().catch(() => ({}));
     const provider = body.provider as string | undefined;
     const apiKey = body.apiKey as string | undefined;
@@ -120,19 +130,6 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET() {
-  await reconcileWithDocker();
-
-  const list = Array.from(instances.values()).map((inst) => ({
-    id: inst.id,
-    status: inst.status,
-    dashboardUrl: inst.dashboardUrl,
-    createdAt: inst.createdAt,
-    persona: inst.persona,
-  }));
-
-  return NextResponse.json({ instances: list });
-}
 
 /** Strip known API key patterns from error messages (defense-in-depth). */
 function sanitizeMessage(msg: string): string {
@@ -166,11 +163,15 @@ async function deployInstance(
       "run", "-d",
       "--name", instance.containerName,
       "--pids-limit", "256",
-      "-p", `${instance.port}:18789`,
+      "--memory", "1536m",
+      "--memory-swap", "1536m",
+      "--cpus", "1",
+      "-p", `127.0.0.1:${instance.port}:18789`,
       "-v", `${volumeName}:/home/node/.openclaw`,
       "-e", `OPENCLAW_GATEWAY_TOKEN=${instance.token}`,
       "-e", "PORT=18789",
       "-e", `${apiKeyEnvVar}=${apiKey}`,
+      "-e", "NODE_OPTIONS=--max-old-space-size=1024",
     ];
     dockerArgs.push(
       "--restart", "unless-stopped",

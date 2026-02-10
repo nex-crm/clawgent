@@ -22,6 +22,16 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  // Authenticate
+  let userId: string;
+  if (isWorkOSConfigured) {
+    const { withAuth } = await import("@workos-inc/authkit-nextjs");
+    const session = await withAuth({ ensureSignedIn: true });
+    userId = session.user.id;
+  } else {
+    userId = DEV_USER_ID;
+  }
+
   const { id } = await params;
 
   let instance = instances.get(id);
@@ -31,6 +41,12 @@ export async function GET(
   }
   if (!instance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 });
+  }
+  if (instance.userId !== userId) {
+    return NextResponse.json(
+      { error: "You can only view channels on your own instance" },
+      { status: 403 },
+    );
   }
   if (instance.status !== "running") {
     return NextResponse.json(
@@ -93,9 +109,9 @@ export async function GET(
 
     return NextResponse.json({ channels });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[api] Error listing channels for instance ${id}:`, err);
     return NextResponse.json(
-      { error: `Failed to list channels: ${message}` },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }
@@ -131,7 +147,7 @@ export async function POST(
   if (!instance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 });
   }
-  if (instance.userId && instance.userId !== userId) {
+  if (instance.userId !== userId) {
     return NextResponse.json(
       { error: "You can only configure channels on your own instance" },
       { status: 403 },
@@ -226,9 +242,9 @@ export async function POST(
       message: `${channelType} channel configured. The gateway will connect shortly.`,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[api] Error configuring channel ${channelType} for instance ${id}:`, err);
     return NextResponse.json(
-      { error: `Failed to configure ${channelType}: ${message}` },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }

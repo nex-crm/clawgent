@@ -49,7 +49,7 @@ app.prepare().then(() => {
   // everything else to Next.js (HMR).
   server.on("upgrade", (req: IncomingMessage, socket: Socket, head: Buffer) => {
     const url = req.url || "";
-    const match = url.match(/^\/i\/([a-z0-9]+)(\/.*)?$/);
+    const match = url.match(/^\/i\/([a-f0-9]{24})(\/.*)?$/);
 
     if (!match) {
       // Let Next.js handle HMR and other WebSocket upgrades
@@ -81,8 +81,10 @@ app.prepare().then(() => {
 
       let httpReq = `GET ${fullPath} HTTP/1.1\r\n`;
       for (const [key, value] of Object.entries(headers)) {
-        if (value)
-          httpReq += `${key}: ${Array.isArray(value) ? value.join(", ") : value}\r\n`;
+        if (value) {
+          const sanitized = (Array.isArray(value) ? value.join(", ") : value).replace(/[\r\n]/g, "");
+          httpReq += `${key}: ${sanitized}\r\n`;
+        }
       }
       httpReq += "\r\n";
 

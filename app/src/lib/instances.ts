@@ -194,7 +194,7 @@ export async function reconcileWithDocker(): Promise<void> {
 
       // Parse port from docker output like "0.0.0.0:19000->18789/tcp"
       let port = 0;
-      const portMatch = ports?.match(/0\.0\.0\.0:(\d+)->/);
+      const portMatch = ports?.match(/(?:0\.0\.0\.0|127\.0\.0\.1):(\d+)->/);
       if (portMatch) port = parseInt(portMatch[1], 10);
 
       const isUp = dockerStatus?.startsWith("Up");

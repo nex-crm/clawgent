@@ -15,22 +15,14 @@ export async function GET() {
     await reconcileWithDocker();
   }
 
-  const runningInstances = Array.from(instances.values()).filter(
+  const allInstances = Array.from(instances.values());
+  const runningCount = allInstances.filter(
     (i) => i.status === "running"
-  );
+  ).length;
 
   return NextResponse.json({
     dockerAvailable,
     totalInstances: instances.size,
-    runningInstances: runningInstances.length,
-    instances: runningInstances.map((i) => ({
-      id: i.id,
-      status: i.status,
-      dashboardUrl: i.dashboardUrl,
-      createdAt: i.createdAt,
-      persona: i.persona,
-      provider: i.provider,
-      modelId: i.modelId,
-    })),
+    runningInstances: runningCount,
   });
 }

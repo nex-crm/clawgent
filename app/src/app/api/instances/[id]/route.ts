@@ -32,7 +32,7 @@ export async function GET(
   }
 
   // Only allow the owner to view their instance details
-  if (instance.userId && instance.userId !== userId) {
+  if (instance.userId !== userId) {
     return NextResponse.json(
       { error: "You can only view your own instances" },
       { status: 403 },
@@ -73,7 +73,7 @@ export async function DELETE(
   }
 
   // Only allow the owner to destroy their instance
-  if (instance.userId && instance.userId !== userId) {
+  if (instance.userId !== userId) {
     return NextResponse.json(
       { error: "You can only destroy your own instances" },
       { status: 403 },
@@ -103,7 +103,7 @@ export async function DELETE(
 
     return NextResponse.json({ message: "Instance destroyed", id });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error(`[api] Error destroying instance ${id}:`, err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -16,6 +16,10 @@ export async function proxyRequest(
     return new NextResponse("Instance not found or not running", { status: 404 });
   }
 
+  if (instance.port < 19000 || instance.port > 19099) {
+    return new NextResponse("Invalid instance configuration", { status: 500 });
+  }
+
   // Ensure auto-approver is running for this instance on every visit.
   // Deduplicates internally — no-op if already active.
   startPairingAutoApprover(instance);
@@ -65,11 +69,23 @@ export async function proxyRequest(
       redirect: "manual",
     });
 
-    // Pass through response headers but filter hop-by-hop
+    // Pass through only safe response headers (allowlist approach)
+    const ALLOWED_RESPONSE_HEADERS = new Set([
+      "content-type",
+      "content-length",
+      "cache-control",
+      "etag",
+      "last-modified",
+      "content-encoding",
+      "vary",
+      "accept-ranges",
+      "content-disposition",
+      "x-request-id",
+    ]);
+
     const responseHeaders = new Headers();
     proxyRes.headers.forEach((value, key) => {
-      const lower = key.toLowerCase();
-      if (!["transfer-encoding", "connection"].includes(lower)) {
+      if (ALLOWED_RESPONSE_HEADERS.has(key.toLowerCase())) {
         responseHeaders.set(key, value);
       }
     });
@@ -90,12 +106,15 @@ export async function proxyRequest(
         // Set gatewayUrl and token without clearing device identity keys.
         // OpenClaw stores device keypairs in localStorage — wiping them
         // forces a new pairing request on every page refresh.
+        // Double JSON.stringify to safely escape values for both
+        // the JS string literal and the JSON content (prevents XSS).
+        const settingsData = JSON.stringify({
+          gatewayUrl: gatewayUrl,
+          token: instance.token,
+        });
         const settingsScript = `<script>
 (function() {
-  localStorage.setItem("openclaw.control.settings.v1", JSON.stringify({
-    gatewayUrl: "${gatewayUrl}",
-    token: "${instance.token}"
-  }));
+  localStorage.setItem("openclaw.control.settings.v1", ${JSON.stringify(settingsData)});
 })();
 </script>`;
         html = html.replace("</head>", settingsScript + "</head>");
@@ -115,7 +134,7 @@ export async function proxyRequest(
       headers: responseHeaders,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return new NextResponse(`Proxy error: ${message}`, { status: 502 });
+    console.error(`[proxy] Error proxying to instance ${id}:`, err);
+    return new NextResponse("Bad gateway", { status: 502 });
   }
 }

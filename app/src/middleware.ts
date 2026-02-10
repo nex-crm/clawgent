@@ -38,6 +38,23 @@ export default async function middleware(req: NextRequest, event: NextFetchEvent
     });
   }
 
+  // CSRF: verify Origin header on state-changing requests
+  if (["POST", "PUT", "DELETE", "PATCH"].includes(req.method)) {
+    const origin = req.headers.get("origin");
+    const host = req.headers.get("host") || "";
+    if (origin) {
+      const allowedOrigins = [
+        `https://${host}`,
+        `http://${host}`,
+        "https://clawgent.ai",
+        "http://localhost:3001",
+      ];
+      if (!allowedOrigins.includes(origin)) {
+        return new NextResponse("Forbidden", { status: 403 });
+      }
+    }
+  }
+
   return cachedMiddleware(req, event);
 }
 

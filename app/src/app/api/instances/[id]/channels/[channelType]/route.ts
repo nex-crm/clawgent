@@ -135,9 +135,9 @@ export async function DELETE(
       message: `${channelType} channel disconnected.`,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[api] Error disconnecting channel ${channelType} for instance ${id}:`, err);
     return NextResponse.json(
-      { error: `Failed to disconnect ${channelType}: ${message}` },
+      { error: "Internal server error" },
       { status: 500 },
     );
   }
