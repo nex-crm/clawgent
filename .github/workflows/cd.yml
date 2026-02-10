@@ -128,6 +128,10 @@ jobs:
             "NEXT_PUBLIC_WORKOS_REDIRECT_URI=https://clawgent.ai/auth/callback" \
             "NODE_ENV=production" \
             "PORT=3001" \
+            "PLIVO_AUTH_ID=$PLIVO_AUTH_ID" \
+            "PLIVO_AUTH_TOKEN=$PLIVO_AUTH_TOKEN" \
+            "PLIVO_WHATSAPP_NUMBER=$PLIVO_WHATSAPP_NUMBER" \
+            "PLIVO_WEBHOOK_URL=https://clawgent.ai/api/whatsapp/webhook" \
           | ssh -i ~/.ssh/deploy_key "$EC2_USER@$EC2_HOST" \
             "cat > /opt/clawgent/app/.env.local && chmod 600 /opt/clawgent/app/.env.local"
           echo ".env.local written successfully"
@@ -137,6 +141,9 @@ jobs:
           WORKOS_CLIENT_ID: ${{ secrets.WORKOS_CLIENT_ID }}
           WORKOS_API_KEY: ${{ secrets.WORKOS_API_KEY }}
           WORKOS_COOKIE_PASSWORD: ${{ secrets.WORKOS_COOKIE_PASSWORD }}
+          PLIVO_AUTH_ID: ${{ secrets.PLIVO_AUTH_ID }}
+          PLIVO_AUTH_TOKEN: ${{ secrets.PLIVO_AUTH_TOKEN }}
+          PLIVO_WHATSAPP_NUMBER: ${{ secrets.PLIVO_WHATSAPP_NUMBER }}
 
       - name: Install dependencies and build on server
         run: |

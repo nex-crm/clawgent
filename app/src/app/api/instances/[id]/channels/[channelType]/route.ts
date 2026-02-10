@@ -123,6 +123,7 @@ export async function DELETE(
       distinctId: userId,
       event: 'channel_disconnected',
       properties: {
+        source: "web",
         instance_id: id,
         channel_type: channelType,
       },

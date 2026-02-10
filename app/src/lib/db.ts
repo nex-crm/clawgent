@@ -42,6 +42,28 @@ if (!g.__clawgent_db) {
       callCount INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (userId, date)
     );
+
+    CREATE TABLE IF NOT EXISTS whatsapp_sessions (
+      phone           TEXT PRIMARY KEY,
+      userId          TEXT NOT NULL,
+      currentState    TEXT NOT NULL DEFAULT 'WELCOME',
+      selectedPersona TEXT,
+      selectedProvider TEXT,
+      instanceId      TEXT,
+      createdAt       TEXT NOT NULL,
+      updatedAt       TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS whatsapp_messages (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone     TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      content   TEXT NOT NULL,
+      createdAt TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_whatsapp_sessions_userId ON whatsapp_sessions(userId);
+    CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_phone ON whatsapp_messages(phone);
   `);
 
   // Migration: add expiresAt column if it doesn't exist (for existing DBs)
@@ -50,6 +72,14 @@ if (!g.__clawgent_db) {
     .all() as { name: string }[];
   if (!cols.some((c) => c.name === "expiresAt")) {
     g.__clawgent_db.exec("ALTER TABLE instances ADD COLUMN expiresAt TEXT");
+  }
+
+  // Migration: add activeAgent column to whatsapp_sessions
+  const waCols = g.__clawgent_db
+    .prepare("PRAGMA table_info(whatsapp_sessions)")
+    .all() as { name: string }[];
+  if (!waCols.some((c) => c.name === "activeAgent")) {
+    g.__clawgent_db.exec("ALTER TABLE whatsapp_sessions ADD COLUMN activeAgent TEXT");
   }
 }
 
@@ -84,6 +114,27 @@ const stmtGetAll = db.prepare("SELECT * FROM instances");
 const stmtDelete = db.prepare("DELETE FROM instances WHERE id = ?");
 const stmtCount = db.prepare("SELECT COUNT(*) as count FROM instances");
 const stmtGetIds = db.prepare("SELECT id FROM instances");
+
+// --- WhatsApp prepared statements ---
+
+const stmtGetWaSession = db.prepare("SELECT * FROM whatsapp_sessions WHERE phone = ?");
+const stmtUpsertWaSession = db.prepare(`
+  INSERT INTO whatsapp_sessions (phone, userId, currentState, selectedPersona, selectedProvider, instanceId, activeAgent, createdAt, updatedAt)
+  VALUES (@phone, @userId, @currentState, @selectedPersona, @selectedProvider, @instanceId, @activeAgent, @createdAt, @updatedAt)
+  ON CONFLICT(phone) DO UPDATE SET
+    currentState    = @currentState,
+    selectedPersona = @selectedPersona,
+    selectedProvider = @selectedProvider,
+    instanceId      = @instanceId,
+    activeAgent     = @activeAgent,
+    updatedAt       = @updatedAt
+`);
+const stmtDeleteWaSession = db.prepare("DELETE FROM whatsapp_sessions WHERE phone = ?");
+const stmtInsertWaMessage = db.prepare(`
+  INSERT INTO whatsapp_messages (phone, direction, content, createdAt)
+  VALUES (@phone, @direction, @content, @createdAt)
+`);
+const stmtGetWaMessages = db.prepare("SELECT * FROM whatsapp_messages WHERE phone = ? ORDER BY id DESC LIMIT ?");
 
 function rowToInstance(row: Record<string, unknown>): Instance {
   return {
@@ -171,4 +222,53 @@ export function dbCount(): number {
 export function dbGetAllIds(): string[] {
   const rows = stmtGetIds.all() as { id: string }[];
   return rows.map((r) => r.id);
+}
+
+// --- WhatsApp types & CRUD ---
+
+export interface WhatsAppSession {
+  phone: string;
+  userId: string;
+  currentState: string;
+  selectedPersona: string | null;
+  selectedProvider: string | null;
+  instanceId: string | null;
+  activeAgent: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WhatsAppMessage {
+  id: number;
+  phone: string;
+  direction: string;
+  content: string;
+  createdAt: string;
+}
+
+export function dbGetWaSession(phone: string): WhatsAppSession | undefined {
+  const row = stmtGetWaSession.get(phone) as WhatsAppSession | undefined;
+  return row ?? undefined;
+}
+
+export function dbUpsertWaSession(session: WhatsAppSession): void {
+  stmtUpsertWaSession.run({
+    ...session,
+    selectedPersona: session.selectedPersona ?? null,
+    selectedProvider: session.selectedProvider ?? null,
+    instanceId: session.instanceId ?? null,
+    activeAgent: session.activeAgent ?? null,
+  });
+}
+
+export function dbDeleteWaSession(phone: string): void {
+  stmtDeleteWaSession.run(phone);
+}
+
+export function dbInsertWaMessage(msg: Omit<WhatsAppMessage, "id">): void {
+  stmtInsertWaMessage.run(msg);
+}
+
+export function dbGetWaMessages(phone: string, limit = 50): WhatsAppMessage[] {
+  return stmtGetWaMessages.all(phone, limit) as WhatsAppMessage[];
 }

@@ -230,6 +230,7 @@ export async function POST(
       distinctId: userId,
       event: 'channel_connected',
       properties: {
+        source: "web",
         instance_id: id,
         channel_type: channelType,
       },

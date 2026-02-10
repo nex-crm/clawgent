@@ -219,6 +219,7 @@ export async function POST(
       distinctId: userId,
       event: 'agent_added',
       properties: {
+        source: "web",
         instance_id: id,
         agent_id: agentName,
         persona: personaId ?? null,
