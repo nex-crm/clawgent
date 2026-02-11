@@ -200,7 +200,10 @@ async function handleWaAutoLink(
   }
 
   if (!session.user) {
-    const signInUrl = await getSignInUrl();
+    // Encode returnPathname in state so the callback redirects back to this instance
+    const returnPathname = `/i/${instanceId}/`;
+    const state = btoa(JSON.stringify({ returnPathname })).replace(/\+/g, "-").replace(/\//g, "_");
+    const signInUrl = await getSignInUrl({ state });
     const escapedUrl = signInUrl.replace(/"/g, "&quot;");
     return htmlResponse(
       linkPage("Sign in to access this instance",
