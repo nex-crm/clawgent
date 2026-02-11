@@ -213,47 +213,42 @@ async function deployInstance(
     const healthy = await waitForHealth(instance, 60);
 
     if (healthy) {
-      // Run gateway config, model set, and persona injection in parallel
       addLog(instance, "Configuring instance (gateway + model + agent template)...");
 
-      const tasks: Promise<void>[] = [
-        // Gateway config + default model (written directly to openclaw.json
-        // to avoid spawning a second Node process that OOM-kills in the container)
-        injectGatewayConfig(instance, modelId).then(() => {
-          addLog(instance, `Model set: ${modelId}`);
-        }).catch((configErr) => {
-          const msg = configErr instanceof Error ? configErr.message : String(configErr);
-          addLog(instance, `Warning: gateway/model config injection failed (${msg}).`);
-        }),
-      ];
-
-      // Persona injection (files + skills)
-      if (instance.persona) {
-        const mainWsPath = "/home/node/.openclaw/workspace";
-        tasks.push(
-          configureAgentPersona(instance, instance.persona, mainWsPath, (msg) => addLog(instance, msg))
-            .then(async () => {
-              // Set agent identity (depends on persona injection finishing)
-              const personaConfig = PERSONA_CONFIGS[instance.persona!];
-              if (personaConfig) {
-                try {
-                  await runCommand("docker", [
-                    "exec", instance.containerName,
-                    "node", "/app/openclaw.mjs", "agents", "set-identity",
-                    "--agent", "main",
-                    "--name", personaConfig.name,
-                    "--emoji", personaConfig.emoji,
-                  ]);
-                } catch {
-                  addLog(instance, "Note: agent identity command skipped (non-critical).");
-                }
-              }
-              addLog(instance, "Agent template loaded.");
-            })
-        );
+      // Gateway + model config first (writes openclaw.json)
+      try {
+        await injectGatewayConfig(instance, modelId);
+        addLog(instance, `Model set: ${modelId}`);
+      } catch (configErr) {
+        const msg = configErr instanceof Error ? configErr.message : String(configErr);
+        addLog(instance, `Warning: gateway/model config injection failed (${msg}).`);
       }
 
-      await Promise.all(tasks);
+      // Persona injection second (heartbeat also writes openclaw.json — must run after gateway config)
+      if (instance.persona) {
+        try {
+          const mainWsPath = "/home/node/.openclaw/workspace";
+          await configureAgentPersona(instance, instance.persona, mainWsPath, (msg) => addLog(instance, msg));
+          const personaConfig = PERSONA_CONFIGS[instance.persona];
+          if (personaConfig) {
+            try {
+              await runCommand("docker", [
+                "exec", instance.containerName,
+                "node", "/app/openclaw.mjs", "agents", "set-identity",
+                "--agent", "main",
+                "--name", personaConfig.name,
+                "--emoji", personaConfig.emoji,
+              ]);
+            } catch {
+              addLog(instance, "Note: agent identity command skipped (non-critical).");
+            }
+          }
+          addLog(instance, "Agent template loaded.");
+        } catch (personaErr) {
+          const msg = personaErr instanceof Error ? personaErr.message : String(personaErr);
+          addLog(instance, `Warning: persona injection failed (${msg}).`);
+        }
+      }
 
       instance.status = "running";
       instance.dashboardUrl = `/i/${instance.id}/`;

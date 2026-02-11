@@ -1327,37 +1327,36 @@ async function deployWhatsAppInstance(
     const healthy = await waitForHealth(port, 60);
 
     if (healthy) {
-      // Configure gateway + model + persona in parallel
-      // Model is set directly in openclaw.json (not via CLI) to avoid
-      // spawning a second Node process that OOM-kills in the container.
-      const tasks: Promise<void>[] = [
-        injectGatewayConfig(instance, providerConfig.modelId).catch(() => {}),
-      ];
-
-      if (session.selectedPersona) {
-        const mainWsPath = "/home/node/.openclaw/workspace";
-        tasks.push(
-          configureAgentPersona(instance, session.selectedPersona, mainWsPath)
-            .then(async () => {
-              const pc = PERSONA_CONFIGS[session.selectedPersona!];
-              if (pc) {
-                try {
-                  await runCommand("docker", [
-                    "exec", containerName,
-                    "node", "/app/openclaw.mjs", "agents", "set-identity",
-                    "--agent", "main",
-                    "--name", pc.name,
-                    "--emoji", pc.emoji,
-                  ]);
-                } catch {
-                  // Non-critical
-                }
-              }
-            }),
-        );
+      // Gateway + model config first (writes openclaw.json)
+      try {
+        await injectGatewayConfig(instance, providerConfig.modelId);
+      } catch {
+        // Non-fatal: gateway may still work without custom config
       }
 
-      await Promise.all(tasks);
+      // Persona injection second (heartbeat also writes openclaw.json — must run after gateway config)
+      if (session.selectedPersona) {
+        try {
+          const mainWsPath = "/home/node/.openclaw/workspace";
+          await configureAgentPersona(instance, session.selectedPersona, mainWsPath);
+          const pc = PERSONA_CONFIGS[session.selectedPersona];
+          if (pc) {
+            try {
+              await runCommand("docker", [
+                "exec", containerName,
+                "node", "/app/openclaw.mjs", "agents", "set-identity",
+                "--agent", "main",
+                "--name", pc.name,
+                "--emoji", pc.emoji,
+              ]);
+            } catch {
+              // Non-critical
+            }
+          }
+        } catch {
+          // Non-fatal: instance works without persona
+        }
+      }
 
       instance.status = "running";
       instance.dashboardUrl = `/i/${id}/`;
