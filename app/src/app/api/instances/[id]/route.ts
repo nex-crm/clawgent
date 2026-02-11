@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
 import { instances, destroyInstance, reconcileWithDocker } from "@/lib/instances";
 import { getPostHogClient } from "@/lib/posthog-server";
+import { dbGetLinkedByWebUser, dbGetWaSession, dbUpsertWaSession, dbDeleteLinkedByPhone } from "@/lib/db";
+import { sendPlivoMessage } from "@/lib/whatsapp";
 
 export async function GET(
   _request: Request,
@@ -87,6 +89,33 @@ export async function DELETE(
     const createdAt = instance.createdAt;
 
     await destroyInstance(id);
+
+    // Notify linked WhatsApp user and clean up session (non-fatal)
+    try {
+      const linked = dbGetLinkedByWebUser(userId);
+      if (linked) {
+        const waSession = dbGetWaSession(linked.wa_phone);
+        if (waSession && waSession.instanceId === id) {
+          dbUpsertWaSession({
+            ...waSession,
+            currentState: "PERSONA_SELECT",
+            instanceId: null,
+            activeAgent: null,
+            selectedPersona: null,
+            selectedProvider: null,
+            updatedAt: new Date().toISOString(),
+          });
+          await sendPlivoMessage(
+            linked.wa_phone,
+            "your instance was shut down from the web dashboard. send any message to start a new one."
+          );
+        }
+        dbDeleteLinkedByPhone(linked.wa_phone);
+        console.log(`[api] unlinked WA phone ${linked.wa_phone} after web destroy of instance ${id}`);
+      }
+    } catch (waErr) {
+      console.error(`[api] non-fatal: WA notification failed for instance ${id}:`, waErr);
+    }
 
     // Track instance destroyed (server-side)
     const posthog = getPostHogClient();

@@ -537,6 +537,37 @@ export async function handleIncomingMessage(phone: string, text: string): Promis
   // Get or create session — users without a session always start onboarding
   let session = dbGetWaSession(phone);
   if (!session) {
+    // G4: Check if this phone is linked to a web user with a running instance
+    const linked = dbGetLinkedByPhone(phone);
+    if (linked) {
+      const existingInstance = findInstanceByAnyLinkedUserId(linked.web_user_id);
+      if (existingInstance && (existingInstance.status === "running" || existingInstance.status === "starting")) {
+        // Skip onboarding — go directly to ACTIVE
+        const now = new Date().toISOString();
+        session = {
+          phone,
+          userId: `wa-${phone}`,
+          currentState: "ACTIVE",
+          selectedPersona: existingInstance.persona ?? null,
+          selectedProvider: existingInstance.provider ?? null,
+          instanceId: existingInstance.id,
+          activeAgent: "main",
+          createdAt: now,
+          updatedAt: now,
+        };
+        dbUpsertWaSession(session);
+
+        const posthog = getPostHogClient();
+        posthog?.identify({ distinctId: `wa-${phone}`, properties: { source: "whatsapp", phone, channel: "whatsapp" } });
+        posthog?.capture({ distinctId: `wa-${phone}`, event: "wa_session_started", properties: { source: "whatsapp", skipped_onboarding: true, linked_instance: existingInstance.id } });
+
+        console.log(`[wa] Phone ${phone} linked to web user ${linked.web_user_id}, skipping to ACTIVE with instance ${existingInstance.id}`);
+        await sendPlivoMessage(phone, "welcome back! your instance is already running.\n\njust type to chat with your agent.");
+        return null;
+      }
+    }
+
+    // Normal onboarding flow
     session = {
       phone,
       userId: `wa-${phone}`,
@@ -1113,6 +1144,14 @@ async function handleReset(phone: string): Promise<string | null> {
   posthog?.capture({ distinctId: `wa-${phone}`, event: "wa_session_reset", properties: { source: "whatsapp" } });
 
   const session = dbGetWaSession(phone);
+
+  // G2: Clean up linked_accounts if this instance was linked to a web user
+  const linked = dbGetLinkedByPhone(phone);
+  if (linked) {
+    dbDeleteLinkedByPhone(phone);
+    console.log(`[reset] Cleaned up linked_accounts for phone ${phone} (was linked to ${linked.web_user_id})`);
+  }
+
   if (session?.instanceId) {
     try {
       await destroyInstance(session.instanceId);
@@ -1289,12 +1328,10 @@ async function deployWhatsAppInstance(
 
     if (healthy) {
       // Configure gateway + model + persona in parallel
+      // Model is set directly in openclaw.json (not via CLI) to avoid
+      // spawning a second Node process that OOM-kills in the container.
       const tasks: Promise<void>[] = [
-        injectGatewayConfig(instance).catch(() => {}),
-        runCommand("docker", [
-          "exec", containerName,
-          "node", "/app/openclaw.mjs", "models", "set", providerConfig.modelId,
-        ]).then(() => {}).catch(() => {}),
+        injectGatewayConfig(instance, providerConfig.modelId).catch(() => {}),
       ];
 
       if (session.selectedPersona) {
@@ -1432,7 +1469,7 @@ async function isDockerAvailable(): Promise<boolean> {
   }
 }
 
-async function injectGatewayConfig(instance: Instance): Promise<void> {
+async function injectGatewayConfig(instance: Instance, modelId?: string): Promise<void> {
   let config: Record<string, unknown> = {};
   try {
     const raw = await runCommandSilent("docker", [
@@ -1451,6 +1488,14 @@ async function injectGatewayConfig(instance: Instance): Promise<void> {
   controlUi.allowInsecureAuth = true;
   gateway.controlUi = controlUi;
   config.gateway = gateway;
+
+  // Set default model (replaces `openclaw.mjs models set` CLI call
+  // to avoid spawning a second Node process that OOM-kills)
+  if (modelId) {
+    const models = (config.models || {}) as Record<string, unknown>;
+    models.default = modelId;
+    config.models = models;
+  }
 
   const tmpDir = mkdtempSync(join(tmpdir(), "clawgent-gw-"));
   try {

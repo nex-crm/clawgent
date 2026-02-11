@@ -8,8 +8,10 @@
 import { writeFileSync, mkdtempSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-import { runCommand, type Instance } from "./instances";
+import { runCommand, runCommandSilent, type Instance } from "./instances";
 import { PERSONA_CONFIGS, type SkillConfig } from "./personas";
+
+const OPENCLAW_CONFIG_PATH = "/home/node/.openclaw/openclaw.json";
 
 /**
  * Inject persona files (SOUL.md, IDENTITY.md, skills, HEARTBEAT.md)
@@ -80,14 +82,52 @@ export async function configureAgentPersona(
       log?.(`Skills loaded: ${config.skills.map(s => s.name).join(", ")}`);
     }
 
-    // Heartbeat interval requires a CLI call (can't be file-based)
+    // Heartbeat interval: write directly to openclaw.json instead of
+    // spawning `node openclaw.mjs config set` (which OOM-kills in
+    // the memory-constrained container when the gateway is already running).
     if (config.heartbeat) {
       try {
-        await runCommand("docker", [
-          "exec", instance.containerName,
-          "node", "/app/openclaw.mjs", "config", "set",
-          "agents.defaults.heartbeat.every", config.heartbeatInterval,
-        ]);
+        let ocConfig: Record<string, unknown> = {};
+        try {
+          const raw = await runCommandSilent("docker", [
+            "exec", instance.containerName, "cat", OPENCLAW_CONFIG_PATH,
+          ]);
+          ocConfig = JSON.parse(raw);
+        } catch {
+          // Config may not exist yet
+        }
+
+        const agents = (ocConfig.agents || {}) as Record<string, unknown>;
+        const defaults = (agents.defaults || {}) as Record<string, unknown>;
+        const heartbeat = (defaults.heartbeat || {}) as Record<string, unknown>;
+        heartbeat.every = config.heartbeatInterval;
+        defaults.heartbeat = heartbeat;
+        agents.defaults = defaults;
+        ocConfig.agents = agents;
+
+        const hbTmpDir = mkdtempSync(join(tmpdir(), "clawgent-hb-"));
+        try {
+          const configPath = join(hbTmpDir, "openclaw.json");
+          writeFileSync(configPath, JSON.stringify(ocConfig, null, 2));
+          await runCommand("docker", [
+            "cp", configPath, `${instance.containerName}:${OPENCLAW_CONFIG_PATH}`,
+          ]);
+          await runCommand("docker", [
+            "exec", "-u", "root", instance.containerName,
+            "chown", "node:node", OPENCLAW_CONFIG_PATH,
+          ]);
+        } finally {
+          rmSync(hbTmpDir, { recursive: true, force: true });
+        }
+
+        // Signal gateway to reload config
+        try {
+          await runCommandSilent("docker", [
+            "exec", instance.containerName, "kill", "-USR1", "1",
+          ]);
+        } catch {
+          // Non-fatal
+        }
       } catch {
         log?.("Note: heartbeat interval config skipped (non-critical).");
       }

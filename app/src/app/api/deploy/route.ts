@@ -8,6 +8,8 @@ import { instances, type Instance, runCommand, runCommandSilent, reconcileWithDo
 import { PERSONA_CONFIGS } from "@/lib/personas";
 import { configureAgentPersona } from "@/lib/agent-config";
 import { getPostHogClient } from "@/lib/posthog-server";
+import { dbGetLinkedByWebUser, dbGetWaSession, dbUpsertWaSession } from "@/lib/db";
+import { sendPlivoMessage } from "@/lib/whatsapp";
 
 const OPENCLAW_IMAGE = "clawgent-openclaw";
 const OPENCLAW_CONFIG_PATH = "/home/node/.openclaw/openclaw.json";
@@ -215,20 +217,13 @@ async function deployInstance(
       addLog(instance, "Configuring instance (gateway + model + agent template)...");
 
       const tasks: Promise<void>[] = [
-        // Gateway config: trustedProxies + allowedOrigins
-        injectGatewayConfig(instance).catch(() => {
-          addLog(instance, "Warning: gateway config injection failed (non-critical).");
-        }),
-
-        // Set default model
-        runCommand("docker", [
-          "exec", instance.containerName,
-          "node", "/app/openclaw.mjs", "models", "set", modelId,
-        ]).then(() => {
+        // Gateway config + default model (written directly to openclaw.json
+        // to avoid spawning a second Node process that OOM-kills in the container)
+        injectGatewayConfig(instance, modelId).then(() => {
           addLog(instance, `Model set: ${modelId}`);
-        }).catch((modelErr) => {
-          const msg = modelErr instanceof Error ? modelErr.message : String(modelErr);
-          addLog(instance, `Warning: failed to set model (${msg}).`);
+        }).catch((configErr) => {
+          const msg = configErr instanceof Error ? configErr.message : String(configErr);
+          addLog(instance, `Warning: gateway/model config injection failed (${msg}).`);
         }),
       ];
 
@@ -263,6 +258,34 @@ async function deployInstance(
       instance.status = "running";
       instance.dashboardUrl = `/i/${instance.id}/`;
       addLog(instance, `Your instance is live at /i/${instance.id}/ -- go check it out.`);
+
+      // Sync WA session if phone is linked (non-fatal)
+      try {
+        const linked = instance.userId ? dbGetLinkedByWebUser(instance.userId) : undefined;
+        if (linked) {
+          const waSession = dbGetWaSession(linked.wa_phone);
+          if (waSession) {
+            dbUpsertWaSession({
+              ...waSession,
+              instanceId: instance.id,
+              currentState: "ACTIVE",
+              activeAgent: "main",
+              selectedPersona: instance.persona ?? null,
+              selectedProvider: instance.provider ?? null,
+              updatedAt: new Date().toISOString(),
+            });
+            const personaConfig = instance.persona ? PERSONA_CONFIGS[instance.persona] : null;
+            const personaLabel = personaConfig
+              ? `${personaConfig.emoji} ${personaConfig.name}`
+              : "your agent";
+            const message = `${personaLabel} is now live!\n\ndashboard: https://clawgent.ai${instance.dashboardUrl}\n\njust type here to chat with your agent.`;
+            await sendPlivoMessage(linked.wa_phone, message);
+            console.log(`[deploy] synced WA session for phone ${linked.wa_phone} → instance ${instance.id}`);
+          }
+        }
+      } catch (waErr) {
+        console.error(`[deploy] non-fatal: WA session sync failed for instance ${instance.id}:`, waErr);
+      }
 
       // Track successful deployment (server-side)
       const posthog = getPostHogClient();
@@ -370,14 +393,18 @@ async function allocatePort(): Promise<number> {
 }
 
 /**
- * Inject gateway config into the OpenClaw container so it accepts
- * WebSocket connections from the Nginx reverse proxy.
+ * Inject gateway config (and optionally the default model) into the
+ * OpenClaw container by writing directly to openclaw.json.
  *
- * Without this, the gateway rejects connections with:
+ * This avoids spawning a second Node.js process inside the container
+ * (which OOM-kills under the 1536MB memory limit when the gateway is
+ * already running with --max-old-space-size=1024).
+ *
+ * Without the gateway config, the gateway rejects connections with:
  *   "origin not allowed (open the Control UI from the gateway host
  *    or allow it in gateway.controlUi.allowedOrigins)"
  */
-async function injectGatewayConfig(instance: Instance): Promise<void> {
+async function injectGatewayConfig(instance: Instance, modelId?: string): Promise<void> {
   // Read existing config (may have been created by gateway startup)
   let config: Record<string, unknown> = {};
   try {
@@ -401,6 +428,13 @@ async function injectGatewayConfig(instance: Instance): Promise<void> {
   controlUi.allowInsecureAuth = true;
   gateway.controlUi = controlUi;
   config.gateway = gateway;
+
+  // Set default model (replaces `openclaw.mjs models set` CLI call)
+  if (modelId) {
+    const models = (config.models || {}) as Record<string, unknown>;
+    models.default = modelId;
+    config.models = models;
+  }
 
   // Write config into container
   const tmpDir = mkdtempSync(join(tmpdir(), "clawgent-gw-"));
