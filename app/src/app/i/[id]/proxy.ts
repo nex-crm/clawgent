@@ -6,11 +6,11 @@ import {
   dbGetLinkedByPhone,
   dbInsertLinkedAccount,
   dbUpdateInstanceUserId,
-  dbWasUnlinkedPair,
   dbGetWaSession,
   dbUpsertWaSession,
 } from "@/lib/db";
 import { sendPlivoMessage } from "@/lib/whatsapp";
+import { randomInt } from "crypto";
 
 export async function proxyRequest(
   request: NextRequest,
@@ -161,9 +161,27 @@ export async function proxyRequest(
   }
 }
 
+// --- Link code store (in-memory, ephemeral) ---
+interface PendingLinkCode {
+  code: string;
+  webUserId: string;
+  phone: string;
+  instanceId: string;
+  createdAt: number;
+  attempts: number;
+}
+const CODE_TTL = 10 * 60 * 1000; // 10 minutes
+const CODE_COOLDOWN = 60 * 1000; // 1 minute between sends
+const MAX_ATTEMPTS = 5;
+const pendingLinkCodes = new Map<string, PendingLinkCode>();
+
+function getLinkCodeKey(instanceId: string, webUserId: string): string {
+  return `${instanceId}:${webUserId}`;
+}
+
 /**
  * Handle linking when an authenticated web user visits a WA-deployed instance.
- * Shows a confirmation page before linking. Blocks previously-unlinked pairs.
+ * Sends a 6-digit code to WhatsApp owner for verification before linking.
  * Returns a Response if action is needed, or null to proceed with normal proxy.
  */
 async function handleWaAutoLink(
@@ -184,11 +202,10 @@ async function handleWaAutoLink(
   if (!session.user) {
     const signInUrl = await getSignInUrl();
     const escapedUrl = signInUrl.replace(/"/g, "&quot;");
-    return new Response(
+    return htmlResponse(
       linkPage("Sign in to access this instance",
         `<p>This instance was deployed via WhatsApp. Sign in to link it to your web account.</p>` +
-        `<a href="${escapedUrl}" style="display:inline-block;margin-top:16px;padding:12px 32px;background:#00ff88;color:#000;text-decoration:none;border-radius:6px;font-weight:bold">Sign in with email</a>`),
-      { status: 200, headers: { "content-type": "text/html; charset=utf-8" } },
+        `<a href="${escapedUrl}" class="btn btn-primary">Sign in with email</a>`),
     );
   }
 
@@ -199,46 +216,68 @@ async function handleWaAutoLink(
   const existingByPhone = dbGetLinkedByPhone(phone);
   if (existingByPhone?.web_user_id === webUserId) return null;
 
-  // Previously unlinked? Block re-linking from web — user must re-link from WhatsApp dashboard link.
-  if (dbWasUnlinkedPair(webUserId, phone)) {
-    return new Response(
-      errorPage("Access revoked", "This instance was unlinked from your account. Ask the WhatsApp owner to share a new link if you need access."),
-      { status: 403, headers: { "content-type": "text/html; charset=utf-8" } },
-    );
-  }
-
   // Phone linked to DIFFERENT web user? Error.
   if (existingByPhone && existingByPhone.web_user_id !== webUserId) {
-    return new Response(
+    return htmlResponse(
       errorPage("Account conflict", "This WhatsApp number is already linked to a different web account."),
-      { status: 409, headers: { "content-type": "text/html; charset=utf-8" } },
+      409,
     );
   }
 
   // Web user linked to DIFFERENT phone? Error.
   const existingByWeb = dbGetLinkedByWebUser(webUserId);
   if (existingByWeb && existingByWeb.wa_phone !== phone) {
-    return new Response(
+    return htmlResponse(
       errorPage("Account conflict", "Your web account is already linked to a different WhatsApp number."),
-      { status: 409, headers: { "content-type": "text/html; charset=utf-8" } },
+      409,
     );
   }
 
   // Web user has their OWN separate active instance? Error.
   const webInstance = findInstanceByUserId(webUserId);
   if (webInstance && webInstance.id !== instanceId) {
-    return new Response(
-      errorPage(
-        "Both accounts have instances",
-        "Your web account already has a running instance. Destroy one first before linking.",
-      ),
-      { status: 409, headers: { "content-type": "text/html; charset=utf-8" } },
+    return htmlResponse(
+      errorPage("Both accounts have instances",
+        "Your web account already has a running instance. Destroy one first before linking."),
+      409,
     );
   }
 
-  // Check if user confirmed linking via ?confirm_link=1
-  if (request.nextUrl.searchParams.get("confirm_link") === "1") {
-    console.log(`[auto-link] Linking web user ${webUserId} to WA phone ${phone} (instance ${instanceId})`);
+  const codeKey = getLinkCodeKey(instanceId, webUserId);
+
+  // --- Handle code submission ---
+  const submittedCode = request.nextUrl.searchParams.get("link_code");
+  if (submittedCode) {
+    const pending = pendingLinkCodes.get(codeKey);
+
+    if (!pending || Date.now() - pending.createdAt > CODE_TTL) {
+      pendingLinkCodes.delete(codeKey);
+      return htmlResponse(
+        linkPage("Code expired", `<p>That code has expired. Refresh to get a new one.</p>` +
+          `<a href="/i/${instanceId}/" class="btn btn-primary">Try again</a>`),
+      );
+    }
+
+    if (pending.attempts >= MAX_ATTEMPTS) {
+      pendingLinkCodes.delete(codeKey);
+      return htmlResponse(
+        errorPage("Too many attempts", "Too many incorrect codes. Refresh to get a new one."),
+        429,
+      );
+    }
+
+    if (submittedCode !== pending.code) {
+      pending.attempts++;
+      const remaining = MAX_ATTEMPTS - pending.attempts;
+      return htmlResponse(
+        codeInputPage(instanceId, session.user.email,
+          `Wrong code. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`),
+      );
+    }
+
+    // Code is correct — link the accounts
+    pendingLinkCodes.delete(codeKey);
+    console.log(`[link] Linking web user ${webUserId} to WA phone ${phone} (instance ${instanceId})`);
 
     dbInsertLinkedAccount(webUserId, phone);
 
@@ -258,40 +297,93 @@ async function handleWaAutoLink(
       `🔗 your WhatsApp is now linked to *${session.user.email}*\n\nyour instance is accessible from both WhatsApp and the web dashboard.\n\nuse /unlink on WhatsApp to disconnect.`,
     ).catch(() => {});
 
-    // Redirect to clean URL (remove confirm_link param)
     const host = request.headers.get("host") || "localhost:3001";
     const proto = request.headers.get("x-forwarded-proto") || "http";
     return NextResponse.redirect(`${proto}://${host}/i/${instanceId}/`, 302);
   }
 
-  // Show confirmation page
-  const email = session.user.email;
-  const confirmUrl = `/i/${instanceId}/?confirm_link=1`;
-  return new Response(
-    linkPage("Link this instance to your account?",
-      `<p>This instance was deployed via WhatsApp.</p>` +
-      `<p>Linking it to <strong>${email}</strong> lets you manage it from the web dashboard. The WhatsApp owner will be notified.</p>` +
-      `<div style="margin-top:24px;display:flex;gap:12px;justify-content:center">` +
-      `<a href="${confirmUrl}" style="padding:12px 32px;background:#00ff88;color:#000;text-decoration:none;border-radius:6px;font-weight:bold">Yes, link my account</a>` +
-      `<a href="/" style="padding:12px 32px;background:#333;color:#fff;text-decoration:none;border-radius:6px">No thanks</a>` +
-      `</div>`),
-    { status: 200, headers: { "content-type": "text/html; charset=utf-8" } },
+  // --- Generate and send code (or reuse if recently sent) ---
+  const existing = pendingLinkCodes.get(codeKey);
+  const now = Date.now();
+
+  if (!existing || now - existing.createdAt > CODE_TTL) {
+    // Generate new code
+    const code = String(randomInt(100000, 999999));
+    pendingLinkCodes.set(codeKey, {
+      code, webUserId, phone, instanceId, createdAt: now, attempts: 0,
+    });
+    sendPlivoMessage(
+      phone,
+      `🔐 someone wants to link this instance to their web account.\n\ntheir code: *${code}*\n\nshare this code with them if you approve. it expires in 10 minutes.\n\nif this wasn't you, ignore this message.`,
+    ).catch(() => {});
+  } else if (request.nextUrl.searchParams.has("resend") && now - existing.createdAt > CODE_COOLDOWN) {
+    // Resend with new code
+    const code = String(randomInt(100000, 999999));
+    existing.code = code;
+    existing.createdAt = now;
+    existing.attempts = 0;
+    sendPlivoMessage(
+      phone,
+      `🔐 new link code: *${code}*\n\nshare this with the person trying to link to your instance. expires in 10 minutes.`,
+    ).catch(() => {});
+  }
+
+  // Show code input page
+  return htmlResponse(codeInputPage(instanceId, session.user.email));
+}
+
+// --- Page templates ---
+
+function htmlResponse(html: string, status = 200): Response {
+  return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8" } });
+}
+
+const PAGE_STYLES = `
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0a0a0a; color: #fff; }
+    .card { text-align: center; max-width: 440px; padding: 32px; }
+    h2 { margin: 0 0 16px; }
+    p { color: #aaa; line-height: 1.5; }
+    .error-title { color: #ff4444; }
+    .btn { display: inline-block; padding: 12px 32px; text-decoration: none; border-radius: 6px; font-weight: bold; border: none; cursor: pointer; font-size: 16px; }
+    .btn-primary { background: #00ff88; color: #000; }
+    .btn-secondary { background: #333; color: #fff; }
+    .code-input { background: #1a1a1a; border: 2px solid #333; color: #fff; font-size: 32px; letter-spacing: 8px; text-align: center; padding: 12px; border-radius: 8px; width: 220px; font-family: monospace; }
+    .code-input:focus { outline: none; border-color: #00ff88; }
+    .error-msg { color: #ff4444; font-size: 14px; margin-top: 8px; }
+    .subtle { color: #666; font-size: 13px; margin-top: 16px; }
+    .subtle a { color: #888; }
+  </style>`;
+
+function codeInputPage(instanceId: string, email: string, error?: string): string {
+  return (
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Link instance</title>${PAGE_STYLES}</head>` +
+    `<body><div class="card">` +
+    `<h2>Enter link code</h2>` +
+    `<p>A 6-digit code was sent to the WhatsApp owner of this instance. Enter it below to link to <strong>${email}</strong>.</p>` +
+    `<form action="/i/${instanceId}/" method="get" style="margin-top:24px">` +
+    `<input name="link_code" class="code-input" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="000000" autocomplete="off" autofocus required>` +
+    (error ? `<div class="error-msg">${error}</div>` : "") +
+    `<div style="margin-top:20px;display:flex;gap:12px;justify-content:center">` +
+    `<button type="submit" class="btn btn-primary">Verify &amp; link</button>` +
+    `<a href="/" class="btn btn-secondary">Cancel</a></div></form>` +
+    `<p class="subtle">Didn't get the code? <a href="/i/${instanceId}/?resend">Resend code</a></p>` +
+    `</div></body></html>`
   );
 }
 
 function errorPage(title: string, message: string): string {
   return (
-    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title></head>` +
-    `<body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0a0a0a;color:#fff">` +
-    `<div style="text-align:center;max-width:500px"><h2 style="color:#ff4444">${title}</h2>` +
-    `<p>${message}</p><a href="/" style="color:#00ff88">Back to home</a></div></body></html>`
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>${PAGE_STYLES}</head>` +
+    `<body><div class="card"><h2 class="error-title">${title}</h2>` +
+    `<p>${message}</p><a href="/" class="btn btn-secondary" style="margin-top:16px">Back to home</a></div></body></html>`
   );
 }
 
 function linkPage(title: string, body: string): string {
   return (
-    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title></head>` +
-    `<body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0a0a0a;color:#fff">` +
-    `<div style="text-align:center;max-width:500px"><h2>${title}</h2>${body}</div></body></html>`
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>${PAGE_STYLES}</head>` +
+    `<body><div class="card"><h2>${title}</h2>${body}</div></body></html>`
   );
 }
