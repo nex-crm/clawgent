@@ -416,40 +416,83 @@ export async function sendPlivoMessage(to: string, text: string): Promise<void> 
     return;
   }
 
-  if (text.length > MAX_MESSAGE_LENGTH) {
-    text = text.slice(0, MAX_MESSAGE_LENGTH) + "\n\n[Message truncated]";
-  }
+  // Split long messages into chunks instead of truncating
+  const chunks = splitMessage(text, MAX_MESSAGE_LENGTH);
 
   const url = `${PLIVO_API_URL}/Account/${PLIVO_AUTH_ID}/Message/`;
   const auth = Buffer.from(`${PLIVO_AUTH_ID}:${PLIVO_AUTH_TOKEN}`).toString("base64");
 
-  const payload = {
-    src: PLIVO_WHATSAPP_NUMBER,
-    dst: to,
-    type: "whatsapp",
-    text,
-  };
-  console.log(`[whatsapp] Plivo request: POST ${url} src=${payload.src} dst=${payload.dst}`);
+  for (const chunk of chunks) {
+    const payload = {
+      src: PLIVO_WHATSAPP_NUMBER,
+      dst: to,
+      type: "whatsapp",
+      text: chunk,
+    };
+    console.log(`[whatsapp] Plivo request: POST ${url} src=${payload.src} dst=${payload.dst}`);
 
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${auth}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(30000),
-    });
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${auth}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(30000),
+      });
 
-    if (!res.ok) {
-      console.error(`[whatsapp] Plivo send failed: ${res.status} ${await res.text()}`);
-    } else {
-      console.log(`[whatsapp] Plivo send success: ${res.status}`);
+      if (!res.ok) {
+        console.error(`[whatsapp] Plivo send failed: ${res.status} ${await res.text()}`);
+      } else {
+        console.log(`[whatsapp] Plivo send success: ${res.status}`);
+      }
+    } catch (err) {
+      console.error("[whatsapp] Plivo send error:", err);
     }
-  } catch (err) {
-    console.error("[whatsapp] Plivo send error:", err);
   }
+}
+
+/** Split text into chunks of maxLen, breaking at paragraph > sentence > word boundaries. */
+function splitMessage(text: string, maxLen: number): string[] {
+  if (text.length <= maxLen) return [text];
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= maxLen) {
+      chunks.push(remaining);
+      break;
+    }
+
+    let breakAt = -1;
+    // Try paragraph break (double newline)
+    const paraIdx = remaining.lastIndexOf("\n\n", maxLen);
+    if (paraIdx > maxLen * 0.3) breakAt = paraIdx;
+    // Try single newline
+    if (breakAt === -1) {
+      const nlIdx = remaining.lastIndexOf("\n", maxLen);
+      if (nlIdx > maxLen * 0.3) breakAt = nlIdx;
+    }
+    // Try sentence break
+    if (breakAt === -1) {
+      const dotIdx = remaining.lastIndexOf(". ", maxLen);
+      if (dotIdx > maxLen * 0.3) breakAt = dotIdx + 1;
+    }
+    // Try space
+    if (breakAt === -1) {
+      const spIdx = remaining.lastIndexOf(" ", maxLen);
+      if (spIdx > maxLen * 0.3) breakAt = spIdx;
+    }
+    // Hard cut as last resort
+    if (breakAt === -1) breakAt = maxLen;
+
+    chunks.push(remaining.slice(0, breakAt).trimEnd());
+    remaining = remaining.slice(breakAt).trimStart();
+  }
+
+  return chunks;
 }
 
 export async function sendPlivoInteractive(to: string, interactive: PlivoInteractive, fallbackText?: string): Promise<void> {
@@ -850,7 +893,13 @@ async function handleActive(session: WhatsAppSession, text: string): Promise<str
 
   // Track message sent to agent
   posthog?.capture({ distinctId: session.userId, event: "wa_message_sent", properties: { source: "whatsapp", agent_id: session.activeAgent ?? "main" } });
-  return await proxyToOpenClaw(inst, text, session.activeAgent);
+
+  // Send typing indicator so the user knows the message was received
+  await sendPlivoMessage(session.phone, "🤔");
+
+  const reply = await proxyToOpenClaw(inst, text, session.activeAgent);
+  await sendPlivoMessage(session.phone, reply);
+  return null;
 }
 
 // --- Agent management commands ---
