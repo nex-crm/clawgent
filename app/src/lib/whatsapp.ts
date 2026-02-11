@@ -4,6 +4,8 @@ import {
   dbDeleteWaSession,
   dbInsertWaMessage,
   dbGetLinkedByPhone,
+  dbDeleteLinkedByPhone,
+  dbUpdateInstanceUserId,
   type WhatsAppSession,
 } from "./db";
 import {
@@ -100,6 +102,7 @@ const HELP_MESSAGE =
   `*/agents* — list agents on your instance\n` +
   `*/add* — add a new agent\n` +
   `*/switch* _name_ — switch active agent\n` +
+  `*/unlink* — disconnect from web account\n` +
   `*/reset* — nuke everything, start fresh\n\n` +
   `_anything without a / goes straight to your active agent._`;
 
@@ -292,6 +295,7 @@ function buildHelpInteractive(): PlivoInteractiveButton {
         "*/agents* — list & switch agents\n" +
         "*/add* — add a new agent\n" +
         "*/switch* _name_ — switch active agent\n" +
+        "*/unlink* — disconnect from web account\n" +
         "*/reset* — nuke everything, start fresh\n\n" +
         "_anything without a / goes straight to your active agent._",
     },
@@ -806,6 +810,10 @@ async function handleActive(session: WhatsAppSession, text: string): Promise<str
     posthog?.capture({ distinctId: session.userId, event: "wa_command_used", properties: { source: "whatsapp", command: "/switch" } });
     return await handleSwitchCommand(session, inst, text.trim());
   }
+  if (cmd === "/unlink") {
+    posthog?.capture({ distinctId: session.userId, event: "wa_command_used", properties: { source: "whatsapp", command: "/unlink" } });
+    return await handleUnlinkCommand(session);
+  }
 
   // Track message sent to agent
   posthog?.capture({ distinctId: session.userId, event: "wa_message_sent", properties: { source: "whatsapp", agent_id: session.activeAgent ?? "main" } });
@@ -1064,6 +1072,36 @@ async function handleSwitchCommand(
   posthog?.capture({ distinctId: session.userId, event: "wa_agent_switched", properties: { source: "whatsapp", from_agent: fromAgent, to_agent: target.id } });
 
   return `🔄 switched to ${target.emoji} *${target.name}*\n\ngo ahead, talk to your ${target.name.toLowerCase()}.`;
+}
+
+async function handleUnlinkCommand(session: WhatsAppSession): Promise<string> {
+  const phone = session.phone;
+  const linked = dbGetLinkedByPhone(phone);
+
+  if (!linked) {
+    return "your WhatsApp isn't linked to any web account.";
+  }
+
+  const waUserId = `wa-${phone}`;
+
+  // Remove linked_accounts entry
+  dbDeleteLinkedByPhone(phone);
+
+  // Revert instance.userId to wa-{phone} if instance exists
+  if (session.instanceId) {
+    dbUpdateInstanceUserId(session.instanceId, waUserId);
+    const cached = instances.get(session.instanceId);
+    if (cached) cached.userId = waUserId;
+  }
+
+  // Revert whatsapp_sessions.userId to wa-{phone}
+  session.userId = waUserId;
+  session.updatedAt = new Date().toISOString();
+  dbUpsertWaSession(session);
+
+  console.log(`[unlink] Unlinked WA phone ${phone} from web user ${linked.web_user_id}`);
+
+  return `🔓 unlinked from web account.\n\nyour instance is now WhatsApp-only again. visit the dashboard to re-link.`;
 }
 
 async function handleReset(phone: string): Promise<string | null> {
