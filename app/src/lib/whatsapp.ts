@@ -104,7 +104,8 @@ const HELP_MESSAGE =
   `*/switch* _name_ — switch active agent\n` +
   `*/unlink* — disconnect from web account\n` +
   `*/reset* — nuke everything, start fresh\n\n` +
-  `_anything without a / goes straight to your active agent._`;
+  `_anything without a / goes straight to your active agent._\n\n` +
+  `🌐 web dashboard: ${BASE_URL}`;
 
 const PROVIDER_KEY_URLS: Record<string, string> = {
   anthropic: "console.anthropic.com/settings/keys",
@@ -297,7 +298,8 @@ function buildHelpInteractive(): PlivoInteractiveButton {
         "*/switch* _name_ — switch active agent\n" +
         "*/unlink* — disconnect from web account\n" +
         "*/reset* — nuke everything, start fresh\n\n" +
-        "_anything without a / goes straight to your active agent._",
+        "_anything without a / goes straight to your active agent._\n\n" +
+        `🌐 web dashboard: ${BASE_URL}`,
     },
     footer: { text: "clawgent.ai" },
     action: {
@@ -1101,7 +1103,8 @@ async function handleUnlinkCommand(session: WhatsAppSession): Promise<string> {
 
   console.log(`[unlink] Unlinked WA phone ${phone} from web user ${linked.web_user_id}`);
 
-  return `🔓 unlinked from web account.\n\nyour instance is now WhatsApp-only again. visit the dashboard to re-link.`;
+  const dashboardLink = session.instanceId ? `${BASE_URL}/i/${session.instanceId}/` : BASE_URL;
+  return `🔓 unlinked from web account.\n\nyour instance is now WhatsApp-only again.\n\n🌐 re-link anytime: ${dashboardLink}`;
 }
 
 async function handleReset(phone: string): Promise<string | null> {
