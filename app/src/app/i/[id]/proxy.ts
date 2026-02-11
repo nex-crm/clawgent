@@ -6,6 +6,7 @@ import {
   dbGetLinkedByPhone,
   dbInsertLinkedAccount,
   dbUpdateInstanceUserId,
+  dbWasUnlinkedPair,
   dbGetWaSession,
   dbUpsertWaSession,
 } from "@/lib/db";
@@ -161,9 +162,9 @@ export async function proxyRequest(
 }
 
 /**
- * Handle auto-linking when an authenticated web user visits a WA-deployed instance.
- * Returns a Response if the user needs to authenticate or if there's a conflict.
- * Returns null if linking succeeded or was already done — caller should proceed normally.
+ * Handle linking when an authenticated web user visits a WA-deployed instance.
+ * Shows a confirmation page before linking. Blocks previously-unlinked pairs.
+ * Returns a Response if action is needed, or null to proceed with normal proxy.
  */
 async function handleWaAutoLink(
   request: NextRequest,
@@ -177,34 +178,36 @@ async function handleWaAutoLink(
   try {
     session = await withAuth();
   } catch {
-    return null; // Auth check failed non-fatally, proceed without linking
+    return null;
   }
 
   if (!session.user) {
-    // Not authenticated — redirect to WorkOS login
-    // After auth, the middleware routes back to the original URL.
     const signInUrl = await getSignInUrl();
     const escapedUrl = signInUrl.replace(/"/g, "&quot;");
     return new Response(
-      `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${escapedUrl}">` +
-      `<title>Sign in to access this instance</title></head>` +
-      `<body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0a0a0a;color:#fff">` +
-      `<div style="text-align:center"><h2>Sign in to access this instance</h2>` +
-      `<p>This instance was deployed via WhatsApp. Sign in to link it to your web account.</p>` +
-      `<a href="${escapedUrl}" style="color:#00ff88">Sign in with email</a></div></body></html>`,
+      linkPage("Sign in to access this instance",
+        `<p>This instance was deployed via WhatsApp. Sign in to link it to your web account.</p>` +
+        `<a href="${escapedUrl}" style="display:inline-block;margin-top:16px;padding:12px 32px;background:#00ff88;color:#000;text-decoration:none;border-radius:6px;font-weight:bold">Sign in with email</a>`),
       { status: 200, headers: { "content-type": "text/html; charset=utf-8" } },
     );
   }
 
-  // Authenticated — run auto-link logic
   const webUserId = session.user.id;
   const phone = instance.userId!.replace("wa-", "");
 
-  // 1. Already linked to THIS web user? Skip.
+  // Already linked to THIS web user? Proceed normally.
   const existingByPhone = dbGetLinkedByPhone(phone);
   if (existingByPhone?.web_user_id === webUserId) return null;
 
-  // 2. Phone linked to DIFFERENT web user? Error.
+  // Previously unlinked? Block re-linking from web — user must re-link from WhatsApp dashboard link.
+  if (dbWasUnlinkedPair(webUserId, phone)) {
+    return new Response(
+      errorPage("Access revoked", "This instance was unlinked from your account. Ask the WhatsApp owner to share a new link if you need access."),
+      { status: 403, headers: { "content-type": "text/html; charset=utf-8" } },
+    );
+  }
+
+  // Phone linked to DIFFERENT web user? Error.
   if (existingByPhone && existingByPhone.web_user_id !== webUserId) {
     return new Response(
       errorPage("Account conflict", "This WhatsApp number is already linked to a different web account."),
@@ -212,7 +215,7 @@ async function handleWaAutoLink(
     );
   }
 
-  // 3. Web user linked to DIFFERENT phone? Error.
+  // Web user linked to DIFFERENT phone? Error.
   const existingByWeb = dbGetLinkedByWebUser(webUserId);
   if (existingByWeb && existingByWeb.wa_phone !== phone) {
     return new Response(
@@ -221,7 +224,7 @@ async function handleWaAutoLink(
     );
   }
 
-  // 4. Web user has their OWN separate active instance? Error.
+  // Web user has their OWN separate active instance? Error.
   const webInstance = findInstanceByUserId(webUserId);
   if (webInstance && webInstance.id !== instanceId) {
     return new Response(
@@ -233,32 +236,47 @@ async function handleWaAutoLink(
     );
   }
 
-  // 5. All clear — LINK the accounts
-  console.log(`[auto-link] Linking web user ${webUserId} to WA phone ${phone} (instance ${instanceId})`);
+  // Check if user confirmed linking via ?confirm_link=1
+  if (request.nextUrl.searchParams.get("confirm_link") === "1") {
+    console.log(`[auto-link] Linking web user ${webUserId} to WA phone ${phone} (instance ${instanceId})`);
 
-  // a. Insert linked_accounts
-  dbInsertLinkedAccount(webUserId, phone);
+    dbInsertLinkedAccount(webUserId, phone);
 
-  // b. Update instance.userId from wa-{phone} to webUserId (DB + cache)
-  dbUpdateInstanceUserId(instanceId, webUserId);
-  const cached = instances.get(instanceId);
-  if (cached) cached.userId = webUserId;
+    dbUpdateInstanceUserId(instanceId, webUserId);
+    const cached = instances.get(instanceId);
+    if (cached) cached.userId = webUserId;
 
-  // c. Update whatsapp_sessions.userId to webUserId
-  const waSession = dbGetWaSession(phone);
-  if (waSession) {
-    waSession.userId = webUserId;
-    waSession.updatedAt = new Date().toISOString();
-    dbUpsertWaSession(waSession);
+    const waSession = dbGetWaSession(phone);
+    if (waSession) {
+      waSession.userId = webUserId;
+      waSession.updatedAt = new Date().toISOString();
+      dbUpsertWaSession(waSession);
+    }
+
+    sendPlivoMessage(
+      phone,
+      `🔗 your WhatsApp is now linked to *${session.user.email}*\n\nyour instance is accessible from both WhatsApp and the web dashboard.\n\nuse /unlink on WhatsApp to disconnect.`,
+    ).catch(() => {});
+
+    // Redirect to clean URL (remove confirm_link param)
+    const host = request.headers.get("host") || "localhost:3001";
+    const proto = request.headers.get("x-forwarded-proto") || "http";
+    return NextResponse.redirect(`${proto}://${host}/i/${instanceId}/`, 302);
   }
 
-  // d. Notify on WhatsApp (fire and forget)
-  sendPlivoMessage(
-    phone,
-    `🔗 your WhatsApp is now linked to *${session.user.email}*\n\nyour instance is accessible from both WhatsApp and the web dashboard.\n\nuse /unlink on WhatsApp to disconnect.`,
-  ).catch(() => {});
-
-  return null; // Proceed to serve the proxied page
+  // Show confirmation page
+  const email = session.user.email;
+  const confirmUrl = `/i/${instanceId}/?confirm_link=1`;
+  return new Response(
+    linkPage("Link this instance to your account?",
+      `<p>This instance was deployed via WhatsApp.</p>` +
+      `<p>Linking it to <strong>${email}</strong> lets you manage it from the web dashboard. The WhatsApp owner will be notified.</p>` +
+      `<div style="margin-top:24px;display:flex;gap:12px;justify-content:center">` +
+      `<a href="${confirmUrl}" style="padding:12px 32px;background:#00ff88;color:#000;text-decoration:none;border-radius:6px;font-weight:bold">Yes, link my account</a>` +
+      `<a href="/" style="padding:12px 32px;background:#333;color:#fff;text-decoration:none;border-radius:6px">No thanks</a>` +
+      `</div>`),
+    { status: 200, headers: { "content-type": "text/html; charset=utf-8" } },
+  );
 }
 
 function errorPage(title: string, message: string): string {
@@ -267,5 +285,13 @@ function errorPage(title: string, message: string): string {
     `<body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0a0a0a;color:#fff">` +
     `<div style="text-align:center;max-width:500px"><h2 style="color:#ff4444">${title}</h2>` +
     `<p>${message}</p><a href="/" style="color:#00ff88">Back to home</a></div></body></html>`
+  );
+}
+
+function linkPage(title: string, body: string): string {
+  return (
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title></head>` +
+    `<body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0a0a0a;color:#fff">` +
+    `<div style="text-align:center;max-width:500px"><h2>${title}</h2>${body}</div></body></html>`
   );
 }

@@ -63,9 +63,10 @@ if (!g.__clawgent_db) {
     );
 
     CREATE TABLE IF NOT EXISTS linked_accounts (
-      web_user_id TEXT NOT NULL,
-      wa_phone    TEXT NOT NULL,
-      linked_at   TEXT NOT NULL,
+      web_user_id  TEXT NOT NULL,
+      wa_phone     TEXT NOT NULL,
+      linked_at    TEXT NOT NULL,
+      unlinked_at  TEXT,
       PRIMARY KEY (web_user_id, wa_phone),
       UNIQUE (web_user_id),
       UNIQUE (wa_phone)
@@ -89,6 +90,18 @@ if (!g.__clawgent_db) {
     .all() as { name: string }[];
   if (!waCols.some((c) => c.name === "activeAgent")) {
     g.__clawgent_db.exec("ALTER TABLE whatsapp_sessions ADD COLUMN activeAgent TEXT");
+  }
+
+  // Migration: add unlinked_at column to linked_accounts
+  try {
+    const linkCols = g.__clawgent_db
+      .prepare("PRAGMA table_info(linked_accounts)")
+      .all() as { name: string }[];
+    if (linkCols.length > 0 && !linkCols.some((c) => c.name === "unlinked_at")) {
+      g.__clawgent_db.exec("ALTER TABLE linked_accounts ADD COLUMN unlinked_at TEXT");
+    }
+  } catch {
+    // Table may not exist yet (will be created by CREATE TABLE IF NOT EXISTS above)
   }
 }
 
@@ -147,10 +160,12 @@ const stmtGetWaMessages = db.prepare("SELECT * FROM whatsapp_messages WHERE phon
 
 // --- Linked accounts prepared statements ---
 
-const stmtGetLinkedByWebUser = db.prepare("SELECT * FROM linked_accounts WHERE web_user_id = ?");
-const stmtGetLinkedByPhone = db.prepare("SELECT * FROM linked_accounts WHERE wa_phone = ?");
+const stmtGetLinkedByWebUser = db.prepare("SELECT * FROM linked_accounts WHERE web_user_id = ? AND unlinked_at IS NULL");
+const stmtGetLinkedByPhone = db.prepare("SELECT * FROM linked_accounts WHERE wa_phone = ? AND unlinked_at IS NULL");
 const stmtInsertLinked = db.prepare("INSERT INTO linked_accounts (web_user_id, wa_phone, linked_at) VALUES (?, ?, ?)");
-const stmtDeleteLinkedByPhone = db.prepare("DELETE FROM linked_accounts WHERE wa_phone = ?");
+const stmtSoftDeleteLinkedByPhone = db.prepare("UPDATE linked_accounts SET unlinked_at = ? WHERE wa_phone = ? AND unlinked_at IS NULL");
+const stmtHardDeleteLinkedByPhone = db.prepare("DELETE FROM linked_accounts WHERE wa_phone = ?");
+const stmtWasUnlinkedPair = db.prepare("SELECT 1 FROM linked_accounts WHERE web_user_id = ? AND wa_phone = ? AND unlinked_at IS NOT NULL LIMIT 1");
 const stmtUpdateInstanceUserId = db.prepare("UPDATE instances SET userId = ? WHERE id = ?");
 
 function rowToInstance(row: Record<string, unknown>): Instance {
@@ -296,6 +311,7 @@ export interface LinkedAccount {
   web_user_id: string;
   wa_phone: string;
   linked_at: string;
+  unlinked_at: string | null;
 }
 
 export function dbGetLinkedByWebUser(webUserId: string): LinkedAccount | undefined {
@@ -307,11 +323,19 @@ export function dbGetLinkedByPhone(phone: string): LinkedAccount | undefined {
 }
 
 export function dbInsertLinkedAccount(webUserId: string, phone: string): void {
+  // Clear any previous unlinked records for this phone before inserting
+  stmtHardDeleteLinkedByPhone.run(phone);
   stmtInsertLinked.run(webUserId, phone, new Date().toISOString());
 }
 
+/** Soft-delete: marks the link as unlinked (preserves history for re-link prevention). */
 export function dbDeleteLinkedByPhone(phone: string): void {
-  stmtDeleteLinkedByPhone.run(phone);
+  stmtSoftDeleteLinkedByPhone.run(new Date().toISOString(), phone);
+}
+
+/** Check if a specific web user was previously unlinked from a phone. */
+export function dbWasUnlinkedPair(webUserId: string, phone: string): boolean {
+  return stmtWasUnlinkedPair.get(webUserId, phone) !== undefined;
 }
 
 export function dbUpdateInstanceUserId(instanceId: string, newUserId: string): void {
