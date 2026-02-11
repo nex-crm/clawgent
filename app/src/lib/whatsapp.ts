@@ -1488,12 +1488,16 @@ async function injectGatewayConfig(instance: Instance, modelId?: string): Promis
   gateway.controlUi = controlUi;
   config.gateway = gateway;
 
-  // Set default model (replaces `openclaw.mjs models set` CLI call
-  // to avoid spawning a second Node process that OOM-kills)
+  // Set default model at agents.defaults.model.primary
+  // (OpenClaw 2026.2.x rejects unknown keys like models.default)
   if (modelId) {
-    const models = (config.models || {}) as Record<string, unknown>;
-    models.default = modelId;
-    config.models = models;
+    const agents = (config.agents || {}) as Record<string, unknown>;
+    const defaults = (agents.defaults || {}) as Record<string, unknown>;
+    const model = (defaults.model || {}) as Record<string, unknown>;
+    model.primary = modelId;
+    defaults.model = model;
+    agents.defaults = defaults;
+    config.agents = agents;
   }
 
   const tmpDir = mkdtempSync(join(tmpdir(), "clawgent-gw-"));
@@ -1512,9 +1516,11 @@ async function injectGatewayConfig(instance: Instance, modelId?: string): Promis
     rmSync(tmpDir, { recursive: true, force: true });
   }
 
+  // Reload gateway config
   try {
     await runCommandSilent("docker", [
-      "exec", instance.containerName, "kill", "-USR1", "1",
+      "exec", instance.containerName,
+      "node", "/app/openclaw.mjs", "gateway", "reload",
     ]);
   } catch {
     // Non-fatal

@@ -424,11 +424,16 @@ async function injectGatewayConfig(instance: Instance, modelId?: string): Promis
   gateway.controlUi = controlUi;
   config.gateway = gateway;
 
-  // Set default model (replaces `openclaw.mjs models set` CLI call)
+  // Set default model at agents.defaults.model.primary
+  // (OpenClaw 2026.2.x rejects unknown keys like models.default)
   if (modelId) {
-    const models = (config.models || {}) as Record<string, unknown>;
-    models.default = modelId;
-    config.models = models;
+    const agents = (config.agents || {}) as Record<string, unknown>;
+    const defaults = (agents.defaults || {}) as Record<string, unknown>;
+    const model = (defaults.model || {}) as Record<string, unknown>;
+    model.primary = modelId;
+    defaults.model = model;
+    agents.defaults = defaults;
+    config.agents = agents;
   }
 
   // Write config into container
@@ -448,11 +453,11 @@ async function injectGatewayConfig(instance: Instance, modelId?: string): Promis
     rmSync(tmpDir, { recursive: true, force: true });
   }
 
-  // Signal gateway to reload the config via SIGUSR1
-  // (the `gateway reload` subcommand doesn't exist in 2026.2.x)
+  // Reload gateway config
   try {
     await runCommandSilent("docker", [
-      "exec", instance.containerName, "kill", "-USR1", "1",
+      "exec", instance.containerName,
+      "node", "/app/openclaw.mjs", "gateway", "reload",
     ]);
   } catch {
     // Non-fatal: gateway will pick up config on next restart

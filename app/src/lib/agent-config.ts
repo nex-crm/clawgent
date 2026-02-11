@@ -120,10 +120,11 @@ export async function configureAgentPersona(
           rmSync(hbTmpDir, { recursive: true, force: true });
         }
 
-        // Signal gateway to reload config
+        // Reload gateway config
         try {
           await runCommandSilent("docker", [
-            "exec", instance.containerName, "kill", "-USR1", "1",
+            "exec", instance.containerName,
+            "node", "/app/openclaw.mjs", "gateway", "reload",
           ]);
         } catch {
           // Non-fatal
