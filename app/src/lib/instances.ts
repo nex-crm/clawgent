@@ -10,6 +10,8 @@ import {
   dbGetInstanceByTokenActive,
   dbGetOrphanedInstances,
   dbDeleteOldStaleInstances,
+  dbGetLinkedByWebUser,
+  dbGetLinkedByPhone,
 } from "./db";
 
 export interface Instance {
@@ -325,6 +327,29 @@ export function findInstanceByUserId(userId: string): Instance | undefined {
   }
   // Also check DB directly for active instances only
   return dbGetInstanceByUserIdActive(userId);
+}
+
+/**
+ * Find an active instance by userId, also checking linked accounts.
+ * If the user has no direct instance, checks if they're linked to
+ * another identity (web↔WA) and returns that instance instead.
+ */
+export function findInstanceByAnyLinkedUserId(userId: string): Instance | undefined {
+  // 1. Direct lookup
+  const direct = findInstanceByUserId(userId);
+  if (direct) return direct;
+
+  // 2. Check linked accounts for the other identity
+  if (userId.startsWith("wa-")) {
+    const phone = userId.replace("wa-", "");
+    const linked = dbGetLinkedByPhone(phone);
+    if (linked) return findInstanceByUserId(linked.web_user_id);
+  } else {
+    const linked = dbGetLinkedByWebUser(userId);
+    if (linked) return findInstanceByUserId(`wa-${linked.wa_phone}`);
+  }
+
+  return undefined;
 }
 
 /** Find an active instance by its gateway token. Used by LLM proxy to validate requests. */

@@ -1,5 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { instances, reconcileWithDocker, startPairingAutoApprover } from "@/lib/instances";
+import { instances, reconcileWithDocker, startPairingAutoApprover, findInstanceByUserId } from "@/lib/instances";
+import { isWorkOSConfigured } from "@/lib/auth-config";
+import {
+  dbGetLinkedByWebUser,
+  dbGetLinkedByPhone,
+  dbInsertLinkedAccount,
+  dbUpdateInstanceUserId,
+  dbGetWaSession,
+  dbUpsertWaSession,
+} from "@/lib/db";
+import { sendPlivoMessage } from "@/lib/whatsapp";
 
 export async function proxyRequest(
   request: NextRequest,
@@ -18,6 +28,17 @@ export async function proxyRequest(
 
   if (instance.port < 19000 || instance.port > 19099) {
     return new NextResponse("Invalid instance configuration", { status: 500 });
+  }
+
+  // --- Auto-link: WA-deployed instances require web auth on HTML page loads ---
+  const isRootHtml = (!subPath || subPath.length === 0) &&
+    (request.headers.get("accept")?.includes("text/html") ?? false);
+
+  if (isRootHtml && instance.userId?.startsWith("wa-")) {
+    const linkResult = await handleWaAutoLink(request, instance, id);
+    if (linkResult) return linkResult;
+    // Re-fetch instance after potential userId migration
+    instance = instances.get(id)!;
   }
 
   // Ensure auto-approver is running for this instance on every visit.
@@ -137,4 +158,114 @@ export async function proxyRequest(
     console.error(`[proxy] Error proxying to instance ${id}:`, err);
     return new NextResponse("Bad gateway", { status: 502 });
   }
+}
+
+/**
+ * Handle auto-linking when an authenticated web user visits a WA-deployed instance.
+ * Returns a Response if the user needs to authenticate or if there's a conflict.
+ * Returns null if linking succeeded or was already done — caller should proceed normally.
+ */
+async function handleWaAutoLink(
+  request: NextRequest,
+  instance: { id: string; userId?: string },
+  instanceId: string,
+): Promise<Response | null> {
+  if (!isWorkOSConfigured) return null;
+
+  const { withAuth, getSignInUrl } = await import("@workos-inc/authkit-nextjs");
+  let session: Awaited<ReturnType<typeof withAuth>>;
+  try {
+    session = await withAuth();
+  } catch {
+    return null; // Auth check failed non-fatally, proceed without linking
+  }
+
+  if (!session.user) {
+    // Not authenticated — redirect to WorkOS login
+    // After auth, the middleware routes back to the original URL.
+    const signInUrl = await getSignInUrl();
+    const escapedUrl = signInUrl.replace(/"/g, "&quot;");
+    return new Response(
+      `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${escapedUrl}">` +
+      `<title>Sign in to access this instance</title></head>` +
+      `<body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0a0a0a;color:#fff">` +
+      `<div style="text-align:center"><h2>Sign in to access this instance</h2>` +
+      `<p>This instance was deployed via WhatsApp. Sign in to link it to your web account.</p>` +
+      `<a href="${escapedUrl}" style="color:#00ff88">Sign in with email</a></div></body></html>`,
+      { status: 200, headers: { "content-type": "text/html; charset=utf-8" } },
+    );
+  }
+
+  // Authenticated — run auto-link logic
+  const webUserId = session.user.id;
+  const phone = instance.userId!.replace("wa-", "");
+
+  // 1. Already linked to THIS web user? Skip.
+  const existingByPhone = dbGetLinkedByPhone(phone);
+  if (existingByPhone?.web_user_id === webUserId) return null;
+
+  // 2. Phone linked to DIFFERENT web user? Error.
+  if (existingByPhone && existingByPhone.web_user_id !== webUserId) {
+    return new Response(
+      errorPage("Account conflict", "This WhatsApp number is already linked to a different web account."),
+      { status: 409, headers: { "content-type": "text/html; charset=utf-8" } },
+    );
+  }
+
+  // 3. Web user linked to DIFFERENT phone? Error.
+  const existingByWeb = dbGetLinkedByWebUser(webUserId);
+  if (existingByWeb && existingByWeb.wa_phone !== phone) {
+    return new Response(
+      errorPage("Account conflict", "Your web account is already linked to a different WhatsApp number."),
+      { status: 409, headers: { "content-type": "text/html; charset=utf-8" } },
+    );
+  }
+
+  // 4. Web user has their OWN separate active instance? Error.
+  const webInstance = findInstanceByUserId(webUserId);
+  if (webInstance && webInstance.id !== instanceId) {
+    return new Response(
+      errorPage(
+        "Both accounts have instances",
+        "Your web account already has a running instance. Destroy one first before linking.",
+      ),
+      { status: 409, headers: { "content-type": "text/html; charset=utf-8" } },
+    );
+  }
+
+  // 5. All clear — LINK the accounts
+  console.log(`[auto-link] Linking web user ${webUserId} to WA phone ${phone} (instance ${instanceId})`);
+
+  // a. Insert linked_accounts
+  dbInsertLinkedAccount(webUserId, phone);
+
+  // b. Update instance.userId from wa-{phone} to webUserId (DB + cache)
+  dbUpdateInstanceUserId(instanceId, webUserId);
+  const cached = instances.get(instanceId);
+  if (cached) cached.userId = webUserId;
+
+  // c. Update whatsapp_sessions.userId to webUserId
+  const waSession = dbGetWaSession(phone);
+  if (waSession) {
+    waSession.userId = webUserId;
+    waSession.updatedAt = new Date().toISOString();
+    dbUpsertWaSession(waSession);
+  }
+
+  // d. Notify on WhatsApp (fire and forget)
+  sendPlivoMessage(
+    phone,
+    `🔗 your WhatsApp is now linked to *${session.user.email}*\n\nyour instance is accessible from both WhatsApp and the web dashboard.\n\nuse /unlink on WhatsApp to disconnect.`,
+  ).catch(() => {});
+
+  return null; // Proceed to serve the proxied page
+}
+
+function errorPage(title: string, message: string): string {
+  return (
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title></head>` +
+    `<body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0a0a0a;color:#fff">` +
+    `<div style="text-align:center;max-width:500px"><h2 style="color:#ff4444">${title}</h2>` +
+    `<p>${message}</p><a href="/" style="color:#00ff88">Back to home</a></div></body></html>`
+  );
 }

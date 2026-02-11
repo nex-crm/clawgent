@@ -3,6 +3,7 @@ import {
   dbUpsertWaSession,
   dbDeleteWaSession,
   dbInsertWaMessage,
+  dbGetLinkedByPhone,
   type WhatsAppSession,
 } from "./db";
 import {
@@ -10,7 +11,7 @@ import {
   type Instance,
   runCommand,
   runCommandSilent,
-  findInstanceByUserId,
+  findInstanceByAnyLinkedUserId,
   reconcileWithDocker,
   startPairingAutoApprover,
   destroyInstance,
@@ -711,9 +712,9 @@ async function handleApiKey(session: WhatsAppSession, text: string): Promise<str
     return "❌ the deployment server isn't ready right now (Docker is offline).\n\ntry again in a few minutes, or /reset to start over.";
   }
 
-  // Check for existing active instance
+  // Check for existing active instance (including linked accounts)
   await reconcileWithDocker();
-  const existing = findInstanceByUserId(session.userId);
+  const existing = findInstanceByAnyLinkedUserId(session.userId);
   if (existing) {
     session.instanceId = existing.id;
     session.currentState = "ACTIVE";
@@ -1173,6 +1174,11 @@ async function deployWhatsAppInstance(
   const containerName = `${CONTAINER_PREFIX}${id}`;
   const volumeName = `${CONTAINER_PREFIX}data-${id}`;
 
+  // If phone is already linked to a web user, use canonical (web) userId
+  const phone = session.phone;
+  const linked = dbGetLinkedByPhone(phone);
+  const canonicalUserId = linked ? linked.web_user_id : session.userId;
+
   const instance: Instance = {
     id,
     containerName,
@@ -1185,7 +1191,7 @@ async function deployWhatsAppInstance(
     provider: session.selectedProvider!,
     modelId: providerConfig.modelId,
     persona: session.selectedPersona!,
-    userId: session.userId,
+    userId: canonicalUserId,
   };
 
   instances.set(id, instance);

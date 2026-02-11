@@ -62,6 +62,15 @@ if (!g.__clawgent_db) {
       createdAt TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS linked_accounts (
+      web_user_id TEXT NOT NULL,
+      wa_phone    TEXT NOT NULL,
+      linked_at   TEXT NOT NULL,
+      PRIMARY KEY (web_user_id, wa_phone),
+      UNIQUE (web_user_id),
+      UNIQUE (wa_phone)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_whatsapp_sessions_userId ON whatsapp_sessions(userId);
     CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_phone ON whatsapp_messages(phone);
   `);
@@ -135,6 +144,14 @@ const stmtInsertWaMessage = db.prepare(`
   VALUES (@phone, @direction, @content, @createdAt)
 `);
 const stmtGetWaMessages = db.prepare("SELECT * FROM whatsapp_messages WHERE phone = ? ORDER BY id DESC LIMIT ?");
+
+// --- Linked accounts prepared statements ---
+
+const stmtGetLinkedByWebUser = db.prepare("SELECT * FROM linked_accounts WHERE web_user_id = ?");
+const stmtGetLinkedByPhone = db.prepare("SELECT * FROM linked_accounts WHERE wa_phone = ?");
+const stmtInsertLinked = db.prepare("INSERT INTO linked_accounts (web_user_id, wa_phone, linked_at) VALUES (?, ?, ?)");
+const stmtDeleteLinkedByPhone = db.prepare("DELETE FROM linked_accounts WHERE wa_phone = ?");
+const stmtUpdateInstanceUserId = db.prepare("UPDATE instances SET userId = ? WHERE id = ?");
 
 function rowToInstance(row: Record<string, unknown>): Instance {
   return {
@@ -271,4 +288,32 @@ export function dbInsertWaMessage(msg: Omit<WhatsAppMessage, "id">): void {
 
 export function dbGetWaMessages(phone: string, limit = 50): WhatsAppMessage[] {
   return stmtGetWaMessages.all(phone, limit) as WhatsAppMessage[];
+}
+
+// --- Linked accounts types & CRUD ---
+
+export interface LinkedAccount {
+  web_user_id: string;
+  wa_phone: string;
+  linked_at: string;
+}
+
+export function dbGetLinkedByWebUser(webUserId: string): LinkedAccount | undefined {
+  return stmtGetLinkedByWebUser.get(webUserId) as LinkedAccount | undefined;
+}
+
+export function dbGetLinkedByPhone(phone: string): LinkedAccount | undefined {
+  return stmtGetLinkedByPhone.get(phone) as LinkedAccount | undefined;
+}
+
+export function dbInsertLinkedAccount(webUserId: string, phone: string): void {
+  stmtInsertLinked.run(webUserId, phone, new Date().toISOString());
+}
+
+export function dbDeleteLinkedByPhone(phone: string): void {
+  stmtDeleteLinkedByPhone.run(phone);
+}
+
+export function dbUpdateInstanceUserId(instanceId: string, newUserId: string): void {
+  stmtUpdateInstanceUserId.run(newUserId, instanceId);
 }

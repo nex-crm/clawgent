@@ -4,7 +4,7 @@ import { writeFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
-import { instances, type Instance, runCommand, runCommandSilent, reconcileWithDocker, findInstanceByUserId, startPairingAutoApprover } from "@/lib/instances";
+import { instances, type Instance, runCommand, runCommandSilent, reconcileWithDocker, findInstanceByAnyLinkedUserId, startPairingAutoApprover } from "@/lib/instances";
 import { PERSONA_CONFIGS } from "@/lib/personas";
 import { configureAgentPersona } from "@/lib/agent-config";
 import { getPostHogClient } from "@/lib/posthog-server";
@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
 
     // Enforce one instance per user
     await reconcileWithDocker();
-    const existing = findInstanceByUserId(userId);
+    const existing = findInstanceByAnyLinkedUserId(userId);
     if (existing) {
       return NextResponse.json(
         {

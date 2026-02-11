@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
 import {
-  findInstanceByUserId,
+  findInstanceByAnyLinkedUserId,
   reconcileWithDocker,
 } from "@/lib/instances";
 
@@ -40,7 +40,7 @@ export async function GET() {
   // Reconcile to pick up any containers from server restart
   await reconcileWithDocker();
 
-  const instance = findInstanceByUserId(userId);
+  const instance = findInstanceByAnyLinkedUserId(userId);
 
   return NextResponse.json({
     user: userInfo,
