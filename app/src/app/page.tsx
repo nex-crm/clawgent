@@ -180,6 +180,7 @@ interface InstanceSummary {
   provider?: string;
   modelId?: string;
   persona?: string;
+  keyValid?: boolean;
 }
 
 interface InstanceDetail extends InstanceSummary {
@@ -643,6 +644,13 @@ export default function Home() {
   const [showAddAgentSelect, setShowAddAgentSelect] = useState(false);
   const [addAgentHovered, setAddAgentHovered] = useState<Persona | null>(null);
   const [addAgentPinned, setAddAgentPinned] = useState<Persona | null>(null);
+
+  // Settings state (provider/key change)
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsProvider, setSettingsProvider] = useState<Provider>("anthropic");
+  const [settingsApiKey, setSettingsApiKey] = useState("");
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
 
   // Start menu state (SNES-style select)
   const [startMenuIndex, setStartMenuIndex] = useState(0);
@@ -1160,6 +1168,35 @@ export default function Home() {
       fetchUserData();
     } catch {
       // ignore
+    }
+  }
+
+  async function handleSaveSettings() {
+    if (!userInstance || !settingsApiKey.trim()) return;
+    setSettingsSaving(true);
+    setSettingsError(null);
+    try {
+      const res = await fetch(`/api/instances/${userInstance.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: settingsProvider, apiKey: settingsApiKey }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        ArcadeSounds.deploySuccess();
+        setShowSettings(false);
+        setSettingsApiKey("");
+        setSettingsError(null);
+        fetchUserData();
+      } else {
+        ArcadeSounds.deployError();
+        setSettingsError(data.error ?? "Failed to update provider");
+      }
+    } catch (err) {
+      ArcadeSounds.deployError();
+      setSettingsError(err instanceof Error ? err.message : "Network error");
+    } finally {
+      setSettingsSaving(false);
     }
   }
 
@@ -1708,11 +1745,148 @@ export default function Home() {
                     </span>
                   </div>
                   {userInstance?.provider && (
-                    <span className="pixel-font text-[7px] text-white/30">
+                    <button
+                      onClick={() => {
+                        ArcadeSounds.buttonClick();
+                        setSettingsProvider((userInstance.provider as Provider) ?? "anthropic");
+                        setSettingsApiKey("");
+                        setSettingsError(null);
+                        setShowSettings(!showSettings);
+                      }}
+                      onMouseEnter={() => ArcadeSounds.buttonHover()}
+                      className="pixel-font text-[7px] text-white/30 hover:text-white/60 border border-transparent hover:border-white/20 px-2 py-0.5 transition-all cursor-pointer group"
+                    >
                       {PROVIDERS.find((p) => p.value === userInstance.provider)?.shortLabel ?? userInstance.provider}
-                    </span>
+                      <span className="ml-1.5 text-white/0 group-hover:text-white/40 transition-colors">CHANGE</span>
+                    </button>
                   )}
                 </div>
+
+                {/* Key Invalid Banner */}
+                {userInstance?.keyValid === false && !showSettings && (
+                  <div className="arcade-panel px-4 py-3 border-arcade-red/60 bg-arcade-red/10">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="pixel-font text-[8px] text-arcade-red tracking-wider leading-relaxed">
+                        YOUR API KEY IS INVALID OR EXPIRED. UPDATE IT TO KEEP YOUR AGENT WORKING.
+                      </p>
+                      <button
+                        onClick={() => {
+                          ArcadeSounds.buttonClick();
+                          setSettingsProvider((userInstance.provider as Provider) ?? "anthropic");
+                          setSettingsApiKey("");
+                          setSettingsError(null);
+                          setShowSettings(true);
+                        }}
+                        onMouseEnter={() => ArcadeSounds.buttonHover()}
+                        className="pixel-font text-[7px] text-arcade-red border border-arcade-red/40 px-3 py-1.5 hover:bg-arcade-red/20 transition-all cursor-pointer shrink-0"
+                      >
+                        UPDATE KEY
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Settings Section */}
+                {showSettings && (
+                  <div className="arcade-panel p-4 space-y-4 border-arcade-yellow/30">
+                    <div className="flex items-center justify-between">
+                      <p className="pixel-font text-[8px] text-arcade-yellow tracking-wider">
+                        CHANGE LLM PROVIDER / API KEY
+                      </p>
+                      <button
+                        onClick={() => {
+                          ArcadeSounds.back();
+                          setShowSettings(false);
+                          setSettingsError(null);
+                        }}
+                        onMouseEnter={() => ArcadeSounds.buttonHover()}
+                        className="pixel-font text-[7px] text-white/30 hover:text-white/60 cursor-pointer"
+                      >
+                        CANCEL
+                      </button>
+                    </div>
+
+                    {/* Provider buttons */}
+                    <div className="flex gap-2">
+                      {PROVIDERS.map((p) => (
+                        <button
+                          key={p.value}
+                          onClick={() => {
+                            ArcadeSounds.buttonClick();
+                            setSettingsProvider(p.value);
+                            setSettingsApiKey("");
+                            setSettingsError(null);
+                          }}
+                          onMouseEnter={() => ArcadeSounds.buttonHover()}
+                          className={`pixel-font text-[8px] px-3 py-2 border transition-all cursor-pointer flex-1 ${
+                            settingsProvider === p.value
+                              ? "text-arcade-yellow border-arcade-yellow/60 bg-arcade-yellow/10"
+                              : "text-white/30 border-white/10 hover:border-white/20"
+                          }`}
+                        >
+                          {p.shortLabel}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* API key input */}
+                    <div className="space-y-1.5">
+                      <label className="pixel-font text-[6px] text-white/30 tracking-wider">API KEY</label>
+                      <input
+                        type="password"
+                        value={settingsApiKey}
+                        onChange={(e) => {
+                          setSettingsApiKey(e.target.value);
+                          setSettingsError(null);
+                        }}
+                        placeholder={
+                          settingsProvider === "anthropic" ? "sk-ant-..." :
+                          settingsProvider === "google" ? "AIza..." :
+                          "sk-..."
+                        }
+                        className="arcade-input w-full py-2 px-3 text-xs"
+                        disabled={settingsSaving}
+                      />
+                      <a
+                        href={PROVIDERS.find((p) => p.value === settingsProvider)?.keyUrl ?? "#"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="pixel-font text-[6px] text-white/20 hover:text-white/40 transition-colors inline-block"
+                      >
+                        Get a {PROVIDERS.find((p) => p.value === settingsProvider)?.shortLabel} API key →
+                      </a>
+                    </div>
+
+                    {/* Error message */}
+                    {settingsError && (
+                      <p className="pixel-font text-[7px] text-arcade-red tracking-wider">
+                        {settingsError}
+                      </p>
+                    )}
+
+                    {/* Info note */}
+                    <p className="pixel-font text-[6px] text-white/15 tracking-wider">
+                      YOUR AGENTS AND DATA ARE PRESERVED. ONLY THE LLM PROVIDER CHANGES.
+                    </p>
+
+                    {/* Save button */}
+                    <button
+                      onClick={handleSaveSettings}
+                      onMouseEnter={() => ArcadeSounds.buttonHover()}
+                      disabled={settingsSaving || !settingsApiKey.trim()}
+                      className="pixel-font text-[9px] w-full py-2.5 border border-arcade-yellow/60 text-arcade-yellow hover:bg-arcade-yellow/10 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      {settingsSaving ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <span className="w-3 h-3 border border-arcade-yellow border-t-transparent rounded-full animate-spin" />
+                          RESTARTING INSTANCE...
+                        </span>
+                      ) : (
+                        "SAVE & RESTART"
+                      )}
+                    </button>
+                  </div>
+                )}
 
                 {/* Agents Roster */}
                 <div className="space-y-3">

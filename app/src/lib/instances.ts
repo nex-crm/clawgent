@@ -178,6 +178,9 @@ if (!gb.__clawgent_listeners_bootstrapped) {
   import("./instance-listener")
     .then((m) => m.bootstrapListeners())
     .catch((err) => console.error("[instances] Failed to bootstrap listeners:", err));
+  import("./key-validator")
+    .then((m) => m.startKeyValidator())
+    .catch((err) => console.error("[instances] Failed to start key validator:", err));
 }
 
 const CONTAINER_PREFIX = "clawgent-";

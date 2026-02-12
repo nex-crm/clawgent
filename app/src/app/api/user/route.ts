@@ -4,6 +4,7 @@ import {
   findInstanceByAnyLinkedUserId,
   reconcileWithDocker,
 } from "@/lib/instances";
+import { getKeyStatus } from "@/lib/key-validator";
 
 export async function GET() {
   let userId: string | null = null;
@@ -42,6 +43,12 @@ export async function GET() {
 
   const instance = findInstanceByAnyLinkedUserId(userId);
 
+  let keyValid: boolean | undefined;
+  if (instance) {
+    const keyStatus = getKeyStatus(instance.id);
+    keyValid = keyStatus?.valid;
+  }
+
   return NextResponse.json({
     user: userInfo,
     instance: instance
@@ -53,6 +60,7 @@ export async function GET() {
           persona: instance.persona,
           provider: instance.provider,
           modelId: instance.modelId,
+          keyValid,
         }
       : null,
   });
