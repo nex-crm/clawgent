@@ -4,6 +4,7 @@ import { instances, destroyInstance, reconcileWithDocker } from "@/lib/instances
 import { getPostHogClient } from "@/lib/posthog-server";
 import { dbGetLinkedByWebUser, dbGetWaSession, dbUpsertWaSession, dbDeleteLinkedByPhone } from "@/lib/db";
 import { sendPlivoMessage } from "@/lib/whatsapp";
+import { stopInstanceListener } from "@/lib/instance-listener";
 
 export async function GET(
   _request: Request,
@@ -88,6 +89,7 @@ export async function DELETE(
     const persona = instance.persona;
     const createdAt = instance.createdAt;
 
+    stopInstanceListener(id);
     await destroyInstance(id);
 
     // Notify linked WhatsApp user and clean up session (non-fatal)

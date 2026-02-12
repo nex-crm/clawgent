@@ -169,6 +169,17 @@ if (!g.__clawgent_instances) {
 }
 export const instances = g.__clawgent_instances;
 
+// Bootstrap proactive WA listeners after store hydration.
+// Uses a flag on globalThis to avoid re-bootstrapping on Next.js HMR.
+// Dynamic import avoids circular dependency: instances.ts ↔ instance-listener.ts
+const gb = globalThis as unknown as { __clawgent_listeners_bootstrapped?: boolean };
+if (!gb.__clawgent_listeners_bootstrapped) {
+  gb.__clawgent_listeners_bootstrapped = true;
+  import("./instance-listener")
+    .then((m) => m.bootstrapListeners())
+    .catch((err) => console.error("[instances] Failed to bootstrap listeners:", err));
+}
+
 const CONTAINER_PREFIX = "clawgent-";
 
 // Reconcile in-memory state with Docker. Called by API routes to recover

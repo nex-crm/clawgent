@@ -21,6 +21,7 @@ import {
 import { PERSONA_CONFIGS } from "./personas";
 import { configureAgentPersona } from "./agent-config";
 import { sendChatMessage } from "./openclaw-client";
+import { trackOutboundRun, untrackOutboundRun, startInstanceListener, stopInstanceListener } from "./instance-listener";
 import { getPostHogClient } from "./posthog-server";
 import { randomBytes } from "crypto";
 import { writeFileSync, mkdtempSync, rmSync } from "fs";
@@ -605,6 +606,7 @@ export async function handleIncomingMessage(phone: string, text: string): Promis
         posthog?.capture({ distinctId: `wa-${phone}`, event: "wa_session_started", properties: { source: "whatsapp", skipped_onboarding: true, linked_instance: existingInstance.id } });
 
         console.log(`[wa] Phone ${phone} linked to web user ${linked.web_user_id}, skipping to ACTIVE with instance ${existingInstance.id}`);
+        startInstanceListener(existingInstance.id, existingInstance.port, existingInstance.token, phone);
         await sendPlivoMessage(phone, "welcome back! your instance is already running.\n\njust type to chat with your agent.");
         return null;
       }
@@ -801,6 +803,7 @@ async function handleApiKey(session: WhatsAppSession, text: string): Promise<str
     session.activeAgent = "main";
     session.updatedAt = new Date().toISOString();
     dbUpsertWaSession(session);
+    startInstanceListener(existing.id, existing.port, existing.token, session.phone);
     return `You already have a running agent! Just type to chat with your ${personaConfig.emoji} ${personaConfig.name}.`;
   }
 
@@ -844,6 +847,7 @@ function handleDeploying(session: WhatsAppSession): string {
       session.activeAgent = "main";
       session.updatedAt = new Date().toISOString();
       dbUpsertWaSession(session);
+      startInstanceListener(inst.id, inst.port, inst.token, session.phone);
       return "✅ your agent is live! type anything to start chatting.";
     }
     if (inst?.status === "error") {
@@ -894,11 +898,23 @@ async function handleActive(session: WhatsAppSession, text: string): Promise<str
   // Track message sent to agent
   posthog?.capture({ distinctId: session.userId, event: "wa_message_sent", properties: { source: "whatsapp", agent_id: session.activeAgent ?? "main" } });
 
-  // Send typing indicator so the user knows the message was received
-  await sendPlivoMessage(session.phone, "🤔");
+  // Generate runId for outbound tracking (prevents persistent listener from duplicating the response)
+  const runId = crypto.randomUUID();
+  trackOutboundRun(runId);
 
-  const reply = await proxyToOpenClaw(inst, text, session.activeAgent);
-  await sendPlivoMessage(session.phone, reply);
+  // Delayed thinking indicator — only send if OpenClaw takes >60s to respond
+  const thinkingTimer = setTimeout(async () => {
+    await sendPlivoMessage(session.phone, "🤔 still thinking...");
+  }, 60_000);
+
+  try {
+    const reply = await proxyToOpenClaw(inst, text, session.activeAgent, runId);
+    clearTimeout(thinkingTimer);
+    await sendPlivoMessage(session.phone, reply);
+  } finally {
+    clearTimeout(thinkingTimer);
+    untrackOutboundRun(runId);
+  }
   return null;
 }
 
@@ -1169,6 +1185,9 @@ async function handleUnlinkCommand(session: WhatsAppSession): Promise<string> {
   // Remove linked_accounts entry
   dbDeleteLinkedByPhone(phone);
 
+  // Stop proactive listener (web user may manage instance separately now)
+  if (session.instanceId) stopInstanceListener(session.instanceId);
+
   // Revert instance.userId to wa-{phone} if instance exists
   if (session.instanceId) {
     dbUpdateInstanceUserId(session.instanceId, waUserId);
@@ -1202,6 +1221,7 @@ async function handleReset(phone: string): Promise<string | null> {
   }
 
   if (session?.instanceId) {
+    stopInstanceListener(session.instanceId);
     try {
       await destroyInstance(session.instanceId);
     } catch {
@@ -1265,7 +1285,7 @@ async function handleStatus(phone: string): Promise<void> {
 
 // --- OpenClaw message proxy ---
 
-async function proxyToOpenClaw(instance: Instance, message: string, activeAgent?: string | null): Promise<string> {
+async function proxyToOpenClaw(instance: Instance, message: string, activeAgent?: string | null, runId?: string): Promise<string> {
   const sessionKey = activeAgent && activeAgent !== "main"
     ? `agent:${activeAgent}:main`
     : undefined; // let client use server default for main agent
@@ -1278,6 +1298,7 @@ async function proxyToOpenClaw(instance: Instance, message: string, activeAgent?
       sessionKey,
       clientId: "openclaw-control-ui",
       timeout: 120_000,
+      runId,
     });
 
     // Append active agent name so the user knows who responded
@@ -1410,6 +1431,7 @@ async function deployWhatsAppInstance(
       instance.status = "running";
       instance.dashboardUrl = `/i/${id}/`;
       startPairingAutoApprover(instance);
+      startInstanceListener(instance.id, instance.port, instance.token, session.phone);
 
       // Track successful deployment via WhatsApp
       const posthogOk = getPostHogClient();

@@ -10,6 +10,7 @@ import { configureAgentPersona } from "@/lib/agent-config";
 import { getPostHogClient } from "@/lib/posthog-server";
 import { dbGetLinkedByWebUser, dbGetWaSession, dbUpsertWaSession } from "@/lib/db";
 import { sendPlivoMessage } from "@/lib/whatsapp";
+import { startInstanceListener } from "@/lib/instance-listener";
 
 const OPENCLAW_IMAGE = "clawgent-openclaw";
 const OPENCLAW_CONFIG_PATH = "/home/node/.openclaw/openclaw.json";
@@ -275,6 +276,7 @@ async function deployInstance(
               : "your agent";
             const message = `${personaLabel} is now live!\n\ndashboard: https://clawgent.ai${instance.dashboardUrl}\n\njust type here to chat with your agent.`;
             await sendPlivoMessage(linked.wa_phone, message);
+            startInstanceListener(instance.id, instance.port, instance.token, linked.wa_phone);
             console.log(`[deploy] synced WA session for phone ${linked.wa_phone} → instance ${instance.id}`);
           }
         }

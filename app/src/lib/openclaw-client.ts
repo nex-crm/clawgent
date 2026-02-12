@@ -26,6 +26,7 @@ export interface OpenClawConnectOptions {
 export interface OpenClawChatOptions {
   sessionKey?: string;
   timeout?: number;
+  runId?: string;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -150,6 +151,7 @@ export class OpenClawClient {
         this._connected = false;
         for (const [, p] of this.pending) p.reject(new Error("connection closed"));
         this.pending.clear();
+        this.eventListeners.get("_close")?.forEach((fn) => fn(undefined));
       });
     });
   }
@@ -196,7 +198,7 @@ export class OpenClawClient {
   async sendChat(message: string, options?: OpenClawChatOptions): Promise<string> {
     const timeout = options?.timeout ?? 120_000;
     const sk = options?.sessionKey ?? this._sessionKey;
-    const runId = crypto.randomUUID();
+    const runId = options?.runId ?? crypto.randomUUID();
 
     return new Promise<string>((resolve) => {
       let done = false;
@@ -273,7 +275,7 @@ export class OpenClawClient {
  * Suitable for stateless integrations (WhatsApp, Telegram, API, etc.).
  */
 export async function sendChatMessage(
-  options: OpenClawConnectOptions & { message: string; sessionKey?: string; timeout?: number },
+  options: OpenClawConnectOptions & { message: string; sessionKey?: string; timeout?: number; runId?: string },
 ): Promise<string> {
   const client = new OpenClawClient(options);
   try {
@@ -281,6 +283,7 @@ export async function sendChatMessage(
     return await client.sendChat(options.message, {
       sessionKey: options.sessionKey,
       timeout: options.timeout,
+      runId: options.runId,
     });
   } finally {
     client.close();

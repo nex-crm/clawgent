@@ -157,6 +157,7 @@ const stmtInsertWaMessage = db.prepare(`
   VALUES (@phone, @direction, @content, @createdAt)
 `);
 const stmtGetWaMessages = db.prepare("SELECT * FROM whatsapp_messages WHERE phone = ? ORDER BY id DESC LIMIT ?");
+const stmtGetActiveWaSessions = db.prepare("SELECT * FROM whatsapp_sessions WHERE currentState = 'ACTIVE' AND instanceId IS NOT NULL");
 
 // --- Linked accounts prepared statements ---
 
@@ -303,6 +304,10 @@ export function dbInsertWaMessage(msg: Omit<WhatsAppMessage, "id">): void {
 
 export function dbGetWaMessages(phone: string, limit = 50): WhatsAppMessage[] {
   return stmtGetWaMessages.all(phone, limit) as WhatsAppMessage[];
+}
+
+export function dbGetActiveWaSessions(): WhatsAppSession[] {
+  return stmtGetActiveWaSessions.all() as WhatsAppSession[];
 }
 
 // --- Linked accounts types & CRUD ---
