@@ -114,7 +114,7 @@ export async function validateInstanceKey(instanceId: string): Promise<KeyStatus
       if (linked) {
         await sendPlivoMessage(
           linked.wa_phone,
-          "your API key appears to be invalid or expired. update it at clawgent.ai or reply with a new key.",
+          "your API key appears to be invalid or expired. update it at clawgent.ai or use /key to update.",
         );
       }
     } catch (err) {

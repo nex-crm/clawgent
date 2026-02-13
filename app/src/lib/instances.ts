@@ -274,6 +274,19 @@ export async function reconcileWithDocker(): Promise<void> {
         }
         console.log(`[reconcile] Marked instance ${inst.id} as stopped (container not running)`);
       }
+
+      // Recover error instances whose containers are actually running
+      if (inst.status === "error" && runningContainerIds.has(inst.id)) {
+        inst.status = "running";
+        inst.dashboardUrl = `/i/${inst.id}/`;
+        dbUpsertInstance(inst);
+        const cached = instances.get(inst.id);
+        if (cached) {
+          cached.status = "running";
+          cached.dashboardUrl = `/i/${inst.id}/`;
+        }
+        console.log(`[reconcile] Recovered error instance ${inst.id} (container is running)`);
+      }
     }
 
     // Delete stale instances (error/stopped) older than 1 hour

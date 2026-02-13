@@ -285,7 +285,7 @@ export async function PATCH(
     } catch { /* non-fatal */ }
 
     // 6. Wait for health (30s — config already on volume, faster than fresh)
-    const healthy = await waitForHealth(instance.port, 30);
+    const healthy = await waitForHealth(instance.port, 180);
     if (!healthy) {
       instance.status = "error";
       instances.set(id, instance);

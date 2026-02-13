@@ -23,6 +23,7 @@ import { configureAgentPersona } from "./agent-config";
 import { sendChatMessage } from "./openclaw-client";
 import { trackOutboundRun, untrackOutboundRun, startInstanceListener, stopInstanceListener } from "./instance-listener";
 import { getPostHogClient } from "./posthog-server";
+import { clearKeyStatus, validateInstanceKey } from "./key-validator";
 import {
   PLIVO_AUTH_ID,
   PLIVO_AUTH_TOKEN,
@@ -109,6 +110,7 @@ const HELP_MESSAGE =
   `*/agents* — list agents on your instance\n` +
   `*/add* — add a new agent\n` +
   `*/switch* _name_ — switch active agent\n` +
+  `*/key* — change AI provider or API key\n` +
   `*/unlink* — disconnect from web account\n` +
   `*/reset* — nuke everything, start fresh\n\n` +
   `_anything without a / goes straight to your active agent._\n\n` +
@@ -303,6 +305,7 @@ function buildHelpInteractive(): PlivoInteractiveButton {
         "*/agents* — list & switch agents\n" +
         "*/add* — add a new agent\n" +
         "*/switch* _name_ — switch active agent\n" +
+        "*/key* — change AI provider or API key\n" +
         "*/unlink* — disconnect from web account\n" +
         "*/reset* — nuke everything, start fresh\n\n" +
         "_anything without a / goes straight to your active agent._\n\n" +
@@ -655,6 +658,10 @@ export async function handleIncomingMessage(phone: string, text: string): Promis
       return await handleActive(session, text);
     case "ADDING_AGENT":
       return await handleAddingAgentSelect(session, text);
+    case "KEY_PROVIDER_SELECT":
+      return await handleKeyProviderSelect(session, text);
+    case "KEY_INPUT":
+      return await handleKeyInput(session, text);
     default:
       // Unknown state — restart
       session.currentState = "PERSONA_SELECT";
@@ -894,6 +901,10 @@ async function handleActive(session: WhatsAppSession, text: string): Promise<str
   if (cmd.startsWith("/switch")) {
     posthog?.capture({ distinctId: session.userId, event: "wa_command_used", properties: { source: "whatsapp", command: "/switch" } });
     return await handleSwitchCommand(session, inst, text.trim());
+  }
+  if (cmd === "/key") {
+    posthog?.capture({ distinctId: session.userId, event: "wa_command_used", properties: { source: "whatsapp", command: "/key" } });
+    return await handleKeyCommand(session);
   }
   if (cmd === "/unlink") {
     posthog?.capture({ distinctId: session.userId, event: "wa_command_used", properties: { source: "whatsapp", command: "/unlink" } });
@@ -1177,6 +1188,247 @@ async function handleSwitchCommand(
   return `🔄 switched to ${target.emoji} *${target.name}*\n\ngo ahead, talk to your ${target.name.toLowerCase()}.`;
 }
 
+// --- /key command: change provider + API key ---
+
+function buildKeyProviderInteractive(): PlivoInteractiveButton {
+  return {
+    type: "button",
+    body: {
+      text: "which AI model should power your instance?\n\n_this will restart your instance with the new key._",
+    },
+    footer: { text: WA_BRAND_FOOTER },
+    action: {
+      buttons: [
+        { title: "Claude Sonnet 4.5", id: "anthropic" },
+        { title: "Gemini 3 Flash", id: "google" },
+        { title: "GPT-5.2", id: "openai" },
+      ],
+    },
+  };
+}
+
+async function handleKeyCommand(session: WhatsAppSession): Promise<string | null> {
+  session.currentState = "KEY_PROVIDER_SELECT";
+  session.updatedAt = new Date().toISOString();
+  dbUpsertWaSession(session);
+
+  const fallback =
+    "pick your new AI model:\n\n" +
+    buildProviderMenu() +
+    "\n\n_reply 1, 2, or 3 — or /cancel_";
+
+  await sendPlivoInteractive(session.phone, buildKeyProviderInteractive(), fallback);
+  return null;
+}
+
+async function handleKeyProviderSelect(session: WhatsAppSession, text: string): Promise<string | null> {
+  const trimmed = text.trim().toLowerCase();
+
+  if (trimmed === "/cancel") {
+    session.currentState = "ACTIVE";
+    session.updatedAt = new Date().toISOString();
+    dbUpsertWaSession(session);
+    return "cancelled. back to your agent.";
+  }
+
+  let providerKey: string | undefined;
+  if (PROVIDER_KEYS.includes(trimmed)) {
+    providerKey = trimmed;
+  } else {
+    const num = parseInt(trimmed, 10);
+    if (!isNaN(num) && num >= 1 && num <= PROVIDER_KEYS.length) {
+      providerKey = PROVIDER_KEYS[num - 1];
+    }
+  }
+
+  if (!providerKey) {
+    await sendPlivoMessage(session.phone, "pick one of the three models below, or /cancel to go back.");
+    await sendPlivoInteractive(session.phone, buildKeyProviderInteractive());
+    return null;
+  }
+
+  const provider = PROVIDER_CONFIG[providerKey];
+  const keyUrl = PROVIDER_KEY_URLS[providerKey] ?? "";
+
+  session.selectedProvider = providerKey;
+  session.currentState = "KEY_INPUT";
+  session.updatedAt = new Date().toISOString();
+  dbUpsertWaSession(session);
+
+  return (
+    `*${provider.label}* selected.\n\n` +
+    `paste your new API key below.\n\n` +
+    (keyUrl ? `grab it here: ${keyUrl}\n\n` : "") +
+    `🔒 _your key is only used to power your agent instance._\n\n` +
+    `_/cancel to go back_`
+  );
+}
+
+async function handleKeyInput(session: WhatsAppSession, text: string): Promise<string | null> {
+  const trimmed = text.trim();
+
+  if (trimmed.toLowerCase() === "/cancel") {
+    session.currentState = "ACTIVE";
+    session.updatedAt = new Date().toISOString();
+    dbUpsertWaSession(session);
+    return "cancelled. back to your agent.";
+  }
+
+  const apiKey = trimmed;
+  const providerKey = session.selectedProvider!;
+  const config = PROVIDER_CONFIG[providerKey];
+
+  // Basic length check
+  if (apiKey.length < 10) {
+    const hint = API_KEY_PREFIXES[providerKey];
+    return `hmm, that doesn't look like a valid API key 🤔\n\n` +
+      (hint ? `${config.label} keys ${hint.hint}\n\n` : "") +
+      `try again? paste your key below.\n\n_/cancel to go back_`;
+  }
+
+  // Format validation
+  const keyCheck = API_KEY_PREFIXES[providerKey];
+  if (keyCheck && !apiKey.startsWith(keyCheck.prefix)) {
+    return `hmm, that doesn't look like a valid API key 🤔\n\n` +
+      `${config.label} keys ${keyCheck.hint}\n\ntry again?\n\n_/cancel to go back_`;
+  }
+
+  const inst = session.instanceId ? instances.get(session.instanceId) : undefined;
+  if (!inst) {
+    session.currentState = "PERSONA_SELECT";
+    session.instanceId = null;
+    session.activeAgent = null;
+    session.updatedAt = new Date().toISOString();
+    dbUpsertWaSession(session);
+    await sendPlivoMessage(session.phone, "your instance went offline. let's start fresh:");
+    await sendWelcomeInteractive(session.phone);
+    return null;
+  }
+
+  await sendPlivoMessage(session.phone, `⏳ switching to *${config.label}*... this takes ~30 seconds.`);
+
+  try {
+    // 1. Stop listener
+    stopInstanceListener(inst.id);
+
+    // 2. Stop + remove container (volume persists)
+    try {
+      await runCommandSilent("docker", ["stop", inst.containerName]);
+    } catch { /* may already be stopped */ }
+    try {
+      await runCommandSilent("docker", ["rm", "-f", inst.containerName]);
+    } catch { /* may already be removed */ }
+
+    // 3. Update instance state
+    inst.status = "starting";
+    inst.provider = providerKey;
+    inst.modelId = config.modelId;
+    instances.set(inst.id, inst);
+
+    // 4. Recreate container with new API key
+    const volumeName = `clawgent-data-${inst.id}`;
+    const dockerArgs = [
+      "run", "-d",
+      "--name", inst.containerName,
+      "--pids-limit", "256",
+      "--memory", CONTAINER_MEMORY,
+      "--memory-swap", CONTAINER_MEMORY_SWAP,
+      "--cpus", CONTAINER_CPUS,
+      "--cap-drop", "SYS_ADMIN",
+      "--cap-drop", "NET_ADMIN",
+      "--cap-drop", "NET_RAW",
+      "--cap-drop", "SYS_PTRACE",
+      "--cap-drop", "MKNOD",
+      "--cap-drop", "AUDIT_WRITE",
+      "--cap-drop", "SYS_MODULE",
+      "--cap-drop", "DAC_READ_SEARCH",
+      "--cap-drop", "LINUX_IMMUTABLE",
+      "--cap-drop", "SYS_RAWIO",
+      "--cap-drop", "SYS_BOOT",
+      "--security-opt", "no-new-privileges",
+      "-p", `127.0.0.1:${inst.port}:18789`,
+      "-v", `${volumeName}:/home/node/.openclaw`,
+      "-e", `OPENCLAW_GATEWAY_TOKEN=${inst.token}`,
+      "-e", "PORT=18789",
+      "-e", `${config.envVar}=${apiKey}`,
+      "-e", "NODE_OPTIONS=--max-old-space-size=1024",
+      "--restart", "unless-stopped",
+      OPENCLAW_IMAGE,
+      "node", "openclaw.mjs", "gateway",
+      "--port", "18789", "--allow-unconfigured", "--bind", "lan",
+    ];
+    await runCommand("docker", dockerArgs);
+
+    // 5. Fix volume ownership
+    try {
+      await runCommand("docker", [
+        "exec", "-u", "root", inst.containerName,
+        "chown", "-R", "node:node", "/home/node/.openclaw",
+      ]);
+    } catch { /* non-fatal */ }
+
+    // 6. Wait for health
+    const healthy = await waitForHealth(inst.port, 180);
+    if (!healthy) {
+      inst.status = "error";
+      instances.set(inst.id, inst);
+      session.currentState = "ACTIVE";
+      session.updatedAt = new Date().toISOString();
+      dbUpsertWaSession(session);
+      return "❌ instance failed to restart after key change.\n\ntry again with /key or /reset to start over.";
+    }
+
+    // 7. Update model in openclaw.json
+    try {
+      await injectGatewayConfig(inst, config.modelId);
+    } catch {
+      // Non-fatal
+    }
+
+    // 8. Mark running
+    inst.status = "running";
+    inst.dashboardUrl = `/i/${inst.id}/`;
+    instances.set(inst.id, inst);
+
+    // 9. Clear old key status + validate
+    clearKeyStatus(inst.id);
+    validateInstanceKey(inst.id).catch((err) =>
+      console.error(`[wa-key] Key validation after change failed for ${inst.id}:`, err),
+    );
+
+    // 10. Restart pairing auto-approver + listener
+    startPairingAutoApprover(inst);
+    startInstanceListener(inst.id, inst.port, inst.token, session.phone);
+
+    // 11. Back to ACTIVE
+    session.currentState = "ACTIVE";
+    session.updatedAt = new Date().toISOString();
+    dbUpsertWaSession(session);
+
+    const posthog = getPostHogClient();
+    posthog?.capture({
+      distinctId: session.userId,
+      event: "wa_provider_changed",
+      properties: { source: "whatsapp", instance_id: inst.id, provider: providerKey, model_id: config.modelId },
+    });
+
+    console.log(`[wa-key] Provider change complete for instance ${inst.id}: now ${providerKey}`);
+
+    return `✅ switched to *${config.label}*. your instance is back online.\n\njust type to chat with your agent.`;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[wa-key] Provider change error for instance ${inst.id}:`, redactSensitive(msg));
+
+    inst.status = "error";
+    instances.set(inst.id, inst);
+    session.currentState = "ACTIVE";
+    session.updatedAt = new Date().toISOString();
+    dbUpsertWaSession(session);
+
+    return "❌ key change failed. try again with /key or /reset to start over.";
+  }
+}
+
 async function handleUnlinkCommand(session: WhatsAppSession): Promise<string> {
   const phone = session.phone;
   const linked = dbGetLinkedByPhone(phone);
@@ -1399,7 +1651,7 @@ async function deployWhatsAppInstance(
     }
 
     // Wait for gateway health
-    const healthy = await waitForHealth(port, 60);
+    const healthy = await waitForHealth(port, 180);
 
     if (healthy) {
       // Gateway + model config first (writes openclaw.json)

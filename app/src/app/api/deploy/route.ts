@@ -220,7 +220,7 @@ async function deployInstance(
 
     // Step 3: Wait for gateway to become healthy
     addLog(instance, "Waiting for the instance gateway to respond... (it's booting, not ghosting you)");
-    const healthy = await waitForHealth(instance, 60);
+    const healthy = await waitForHealth(instance, 180);
 
     if (healthy) {
       addLog(instance, "Configuring instance (gateway + model + agent template)...");
@@ -313,7 +313,7 @@ async function deployInstance(
       startPairingAutoApprover(instance);
     } else {
       instance.status = "error";
-      addLog(instance, "Instance gateway didn't respond in 60s. That's... not great. Check Docker logs.");
+      addLog(instance, "Instance gateway didn't respond in 180s. That's... not great. Check Docker logs.");
 
       // Track failed deployment (server-side)
       const posthog = getPostHogClient();
