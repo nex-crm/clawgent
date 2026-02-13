@@ -1724,6 +1724,25 @@ export default function Home() {
                     DOCKER IS TAKING A PERSONAL DAY
                   </p>
                 )}
+
+                {/* Sign In shortcut for returning users */}
+                {!authUser && (
+                  <button
+                    onClick={handleSignIn}
+                    onMouseEnter={() => ArcadeSounds.buttonHover()}
+                    disabled={signingIn}
+                    className="pixel-font text-[8px] sm:text-[9px] text-white/30 hover:text-white/60 border border-white/15 hover:border-white/30 px-4 py-1.5 tracking-wider transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed mt-2"
+                  >
+                    {signingIn ? (
+                      <span className="flex items-center gap-2 justify-center">
+                        <span className="w-3 h-3 border border-white/40 border-t-transparent rounded-full animate-spin" />
+                        SIGNING IN...
+                      </span>
+                    ) : (
+                      "SIGN IN"
+                    )}
+                  </button>
+                )}
               </div>
             )}
 

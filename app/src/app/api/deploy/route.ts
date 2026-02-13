@@ -166,9 +166,10 @@ async function deployInstance(
       "run", "-d",
       "--name", instance.containerName,
       "--pids-limit", "256",
-      "--memory", "1536m",
-      "--memory-swap", "1536m",
-      "--cpus", "1",
+      "--memory", "1024m",
+      "--memory-reservation", "768m",
+      "--memory-swap", "1024m",
+      "--cpus", "0.5",
       "--cap-drop", "SYS_ADMIN",
       "--cap-drop", "NET_ADMIN",
       "--cap-drop", "NET_RAW",
@@ -186,7 +187,7 @@ async function deployInstance(
       "-e", `OPENCLAW_GATEWAY_TOKEN=${instance.token}`,
       "-e", "PORT=18789",
       "-e", `${apiKeyEnvVar}=${apiKey}`,
-      "-e", "NODE_OPTIONS=--max-old-space-size=1024",
+      "-e", "NODE_OPTIONS=--max-old-space-size=768",
     ];
     dockerArgs.push(
       "--restart", "unless-stopped",
