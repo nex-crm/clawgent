@@ -11,6 +11,15 @@ import { getPostHogClient } from "@/lib/posthog-server";
 import { dbGetLinkedByWebUser, dbGetWaSession, dbUpsertWaSession } from "@/lib/db";
 import { sendPlivoMessage } from "@/lib/whatsapp";
 import { startInstanceListener } from "@/lib/instance-listener";
+import {
+  MAX_INSTANCES,
+  CONTAINER_MEMORY,
+  CONTAINER_MEMORY_SWAP,
+  CONTAINER_CPUS,
+  BASE_URL,
+  TRUSTED_PROXIES,
+  ALLOWED_ORIGINS,
+} from "@/lib/whatsapp-config";
 
 const OPENCLAW_IMAGE = "clawgent-openclaw";
 const OPENCLAW_CONFIG_PATH = "/home/node/.openclaw/openclaw.json";
@@ -51,7 +60,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Global instance cap to prevent resource exhaustion
-    const MAX_INSTANCES = 20;
     const runningCount = [...instances.values()].filter(i => i.status === "running" || i.status === "starting").length;
     if (runningCount >= MAX_INSTANCES) {
       return NextResponse.json(
@@ -166,10 +174,10 @@ async function deployInstance(
       "run", "-d",
       "--name", instance.containerName,
       "--pids-limit", "256",
-      "--memory", "1024m",
+      "--memory", CONTAINER_MEMORY,
       "--memory-reservation", "768m",
-      "--memory-swap", "1024m",
-      "--cpus", "0.5",
+      "--memory-swap", CONTAINER_MEMORY_SWAP,
+      "--cpus", CONTAINER_CPUS,
       "--cap-drop", "SYS_ADMIN",
       "--cap-drop", "NET_ADMIN",
       "--cap-drop", "NET_RAW",
@@ -275,7 +283,7 @@ async function deployInstance(
             const personaLabel = personaConfig
               ? `${personaConfig.emoji} ${personaConfig.name}`
               : "your agent";
-            const message = `${personaLabel} is now live!\n\ndashboard: https://clawgent.ai${instance.dashboardUrl}\n\njust type here to chat with your agent.`;
+            const message = `${personaLabel} is now live!\n\ndashboard: ${BASE_URL}${instance.dashboardUrl}\n\njust type here to chat with your agent.`;
             await sendPlivoMessage(linked.wa_phone, message);
             startInstanceListener(instance.id, instance.port, instance.token, linked.wa_phone);
             console.log(`[deploy] synced WA session for phone ${linked.wa_phone} → instance ${instance.id}`);
@@ -414,15 +422,12 @@ async function injectGatewayConfig(instance: Instance, modelId?: string): Promis
     // Config may not exist yet
   }
 
-  // Set gateway config: trust Docker bridge proxy + allow clawgent.ai origin
+  // Set gateway config: trust Docker bridge proxy + allow platform origin
   const gateway = (config.gateway || {}) as Record<string, unknown>;
-  gateway.trustedProxies = ["172.17.0.0/16", "127.0.0.1"];
+  gateway.trustedProxies = TRUSTED_PROXIES;
 
   const controlUi = (gateway.controlUi || {}) as Record<string, unknown>;
-  controlUi.allowedOrigins = [
-    "https://clawgent.ai",
-    "http://localhost:3001",
-  ];
+  controlUi.allowedOrigins = ALLOWED_ORIGINS;
   controlUi.allowInsecureAuth = true;
   gateway.controlUi = controlUi;
   config.gateway = gateway;

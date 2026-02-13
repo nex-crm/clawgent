@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import { handleIncomingMessage, sendPlivoMessage } from "@/lib/whatsapp";
+import {
+  PLIVO_AUTH_TOKEN as PLIVO_TOKEN,
+  RATE_LIMIT_WINDOW_MS,
+  RATE_LIMIT_MAX,
+} from "@/lib/whatsapp-config";
 
 // --- Plivo Signature Verification ---
 
-const PLIVO_AUTH_TOKEN = process.env.PLIVO_AUTH_TOKEN ?? "";
 // Explicit webhook URL avoids all proxy header reconstruction issues.
 // Set to the exact URL configured in Plivo Console (e.g. https://clawgent.ai/api/whatsapp/webhook)
 const PLIVO_WEBHOOK_URL = process.env.PLIVO_WEBHOOK_URL ?? "";
@@ -48,7 +52,7 @@ function buildSortedParams(body: string, contentType: string): string {
 }
 
 function hmacCompare(baseString: string, expected: string): boolean {
-  const computed = createHmac("sha256", PLIVO_AUTH_TOKEN)
+  const computed = createHmac("sha256", PLIVO_TOKEN)
     .update(baseString)
     .digest("base64");
   const a = Buffer.from(computed);
@@ -60,7 +64,7 @@ function hmacCompare(baseString: string, expected: string): boolean {
 type SigResult = "verified" | "no_signatures" | "mismatch";
 
 function verifyPlivoSignature(req: NextRequest, body: string): SigResult {
-  if (!PLIVO_AUTH_TOKEN) return "no_signatures";
+  if (!PLIVO_TOKEN) return "no_signatures";
 
   const webhookUrl = getWebhookUrl(req);
 
@@ -116,8 +120,6 @@ function verifyPlivoSignature(req: NextRequest, body: string): SigResult {
 // --- Per-Phone Rate Limiting (in-memory) ---
 
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
-const RATE_LIMIT_MAX = 10; // max messages per minute per phone
 
 function isRateLimited(phone: string): boolean {
   const now = Date.now();
@@ -150,7 +152,7 @@ export async function POST(request: NextRequest) {
 
     // Verify Plivo signature (skip in dev — URL mismatch behind proxy/ngrok)
     const isDev = process.env.NODE_ENV !== "production";
-    if (!isDev && PLIVO_AUTH_TOKEN) {
+    if (!isDev && PLIVO_TOKEN) {
       const sigResult = verifyPlivoSignature(request, rawBody);
       if (sigResult === "mismatch") {
         // Signatures present but invalid — reject (likely spoofed request)

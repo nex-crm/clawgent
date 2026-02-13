@@ -23,6 +23,23 @@ import { configureAgentPersona } from "./agent-config";
 import { sendChatMessage } from "./openclaw-client";
 import { trackOutboundRun, untrackOutboundRun, startInstanceListener, stopInstanceListener } from "./instance-listener";
 import { getPostHogClient } from "./posthog-server";
+import {
+  PLIVO_AUTH_ID,
+  PLIVO_AUTH_TOKEN,
+  PLIVO_WHATSAPP_NUMBER,
+  PLIVO_API_URL,
+  BASE_URL,
+  WA_BRAND_HEADER,
+  WA_BRAND_FOOTER,
+  WA_WELCOME_BODY,
+  WA_HELP_LABEL,
+  MAX_INSTANCES,
+  CONTAINER_MEMORY,
+  CONTAINER_MEMORY_SWAP,
+  CONTAINER_CPUS,
+  TRUSTED_PROXIES,
+  ALLOWED_ORIGINS,
+} from "./whatsapp-config";
 import { randomBytes } from "crypto";
 import { writeFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
@@ -30,21 +47,12 @@ import { tmpdir } from "os";
 
 // --- Config ---
 
-const PLIVO_AUTH_ID = process.env.PLIVO_AUTH_ID ?? "";
-const PLIVO_AUTH_TOKEN = process.env.PLIVO_AUTH_TOKEN ?? "";
-const PLIVO_WHATSAPP_NUMBER = process.env.PLIVO_WHATSAPP_NUMBER ?? "15558452872"; // old number until new one is approved
-const PLIVO_API_URL = "https://api.plivo.com/v1";
-
 const OPENCLAW_IMAGE = "clawgent-openclaw";
 const OPENCLAW_CONFIG_PATH = "/home/node/.openclaw/openclaw.json";
 const PORT_RANGE_START = 19000;
 const CONTAINER_PREFIX = "clawgent-";
 const AGENTS_BASE = "/home/node/.openclaw/agents";
 const MAX_MESSAGE_LENGTH = 4000;
-const BASE_URL =
-  process.env.NODE_ENV === "production"
-    ? "https://clawgent.ai"
-    : `http://localhost:${process.env.PORT ?? 3001}`;
 
 const PROVIDER_CONFIG: Record<string, { envVar: string; modelId: string; label: string }> = {
   anthropic: { envVar: "ANTHROPIC_API_KEY", modelId: "anthropic/claude-sonnet-4-5", label: "Claude (Anthropic)" },
@@ -88,16 +96,14 @@ function buildProviderMenu(): string {
 }
 
 const WELCOME_MESSAGE =
-  `yo, welcome to *clawgent* 🎮\n\n` +
-  `i deploy AI agents that actually do stuff.\n` +
-  `marketing, sales, dev, ops -- pick your agent.\n\n` +
-  `let's get you set up. takes about 60 seconds.\n\n` +
+  `yo, ${WA_BRAND_HEADER} 🎮\n\n` +
+  `${WA_WELCOME_BODY}\n\n` +
   `_pick your agent:_\n\n` +
   buildPersonaMenu() +
   `\n\n_reply with a number (1-${PERSONA_KEYS.length})_`;
 
 const HELP_MESSAGE =
-  `🤖 *clawgent commands*\n\n` +
+  `🤖 *${WA_HELP_LABEL}*\n\n` +
   `*/help* — this message\n` +
   `*/status* — check your instance\n` +
   `*/agents* — list agents on your instance\n` +
@@ -166,11 +172,11 @@ type PlivoInteractive = PlivoInteractiveList | PlivoInteractiveButton;
 function buildPersonaListInteractive(): PlivoInteractiveList {
   return {
     type: "list",
-    header: { type: "text", text: "welcome to clawgent by nex.ai" },
+    header: { type: "text", text: WA_BRAND_HEADER },
     body: {
-      text: "yo, i deploy AI agents that actually do stuff.\nmarketing, sales, dev, ops -- pick your agent.\n\nlet's get you set up. takes about 60 seconds.",
+      text: WA_WELCOME_BODY,
     },
-    footer: { text: "clawgent.ai" },
+    footer: { text: WA_BRAND_FOOTER },
     action: {
       buttons: [{ title: "Choose Agent" }],
       sections: [
@@ -211,7 +217,7 @@ function buildProviderButtonInteractive(personaEmoji: string, personaName: strin
     body: {
       text: `${personaEmoji} ${personaName} -- nice pick.\n\nnow, which AI model should power it?`,
     },
-    footer: { text: "clawgent.ai" },
+    footer: { text: WA_BRAND_FOOTER },
     action: {
       buttons: [
         { title: "Claude Sonnet 4.5", id: "anthropic" },
@@ -227,7 +233,7 @@ function buildPersonaListForAdd(): PlivoInteractiveList {
     type: "list",
     header: { type: "text", text: "add an agent" },
     body: { text: "pick a persona for your new agent.\n\n/cancel to go back." },
-    footer: { text: "clawgent.ai" },
+    footer: { text: WA_BRAND_FOOTER },
     action: {
       buttons: [{ title: "Choose Agent" }],
       sections: [
@@ -265,7 +271,7 @@ function buildAgentListInteractive(
     type: "list",
     header: { type: "text", text: headerText },
     body: { text: body },
-    footer: { text: "clawgent.ai" },
+    footer: { text: WA_BRAND_FOOTER },
     action: {
       buttons: [{ title: "View Agents" }],
       sections: [
@@ -292,7 +298,7 @@ function buildHelpInteractive(): PlivoInteractiveButton {
   return {
     type: "button",
     body: {
-      text: "🤖 *clawgent commands*\n\n" +
+      text: `🤖 *${WA_HELP_LABEL}*\n\n` +
         "*/status* — check your instance\n" +
         "*/agents* — list & switch agents\n" +
         "*/add* — add a new agent\n" +
@@ -302,7 +308,7 @@ function buildHelpInteractive(): PlivoInteractiveButton {
         "_anything without a / goes straight to your active agent._\n\n" +
         `🌐 web dashboard: ${BASE_URL}`,
     },
-    footer: { text: "clawgent.ai" },
+    footer: { text: WA_BRAND_FOOTER },
     action: {
       buttons: [
         { title: "My Agents", id: "/agents" },
@@ -317,7 +323,7 @@ function buildStatusInteractive(statusText: string): PlivoInteractiveButton {
   return {
     type: "button",
     body: { text: statusText },
-    footer: { text: "clawgent.ai" },
+    footer: { text: WA_BRAND_FOOTER },
     action: {
       buttons: [
         { title: "My Agents", id: "/agents" },
@@ -339,7 +345,7 @@ function buildDeploySuccessInteractive(
         `type anything to start chatting with your agent.\n\n` +
         `🌐 web dashboard: ${BASE_URL}/i/${instanceId}/`,
     },
-    footer: { text: "clawgent.ai" },
+    footer: { text: WA_BRAND_FOOTER },
     action: {
       buttons: [
         { title: "My Agents", id: "/agents" },
@@ -362,7 +368,7 @@ function buildAddSuccessInteractive(
       text: `✅ ${personaEmoji} *${personaName}* added!\n\n` +
         `you're still chatting with ${currentDisplay}.`,
     },
-    footer: { text: "clawgent.ai" },
+    footer: { text: WA_BRAND_FOOTER },
     action: {
       buttons: [
         { title: "Switch", id: `/switch ${agentId}` },
@@ -382,7 +388,7 @@ function buildAlreadyHaveAgentInteractive(
     body: {
       text: `you already have ${personaEmoji} *${personaName}* on this instance.`,
     },
-    footer: { text: "clawgent.ai" },
+    footer: { text: WA_BRAND_FOOTER },
     action: {
       buttons: [
         { title: "Switch", id: `/switch ${agentId}` },
@@ -808,7 +814,6 @@ async function handleApiKey(session: WhatsAppSession, text: string): Promise<str
   }
 
   // Global instance cap
-  const MAX_INSTANCES = 20;
   const runningCount = [...instances.values()].filter(
     (i) => i.status === "running" || i.status === "starting",
   ).length;
@@ -1355,9 +1360,9 @@ async function deployWhatsAppInstance(
       "run", "-d",
       "--name", containerName,
       "--pids-limit", "256",
-      "--memory", "1536m",
-      "--memory-swap", "1536m",
-      "--cpus", "1",
+      "--memory", CONTAINER_MEMORY,
+      "--memory-swap", CONTAINER_MEMORY_SWAP,
+      "--cpus", CONTAINER_CPUS,
       "--cap-drop", "SYS_ADMIN",
       "--cap-drop", "NET_ADMIN",
       "--cap-drop", "NET_RAW",
@@ -1551,10 +1556,10 @@ async function injectGatewayConfig(instance: Instance, modelId?: string): Promis
   }
 
   const gateway = (config.gateway || {}) as Record<string, unknown>;
-  gateway.trustedProxies = ["172.17.0.0/16", "127.0.0.1"];
+  gateway.trustedProxies = TRUSTED_PROXIES;
 
   const controlUi = (gateway.controlUi || {}) as Record<string, unknown>;
-  controlUi.allowedOrigins = ["https://clawgent.ai", "http://localhost:3001"];
+  controlUi.allowedOrigins = ALLOWED_ORIGINS;
   controlUi.allowInsecureAuth = true;
   gateway.controlUi = controlUi;
   config.gateway = gateway;
