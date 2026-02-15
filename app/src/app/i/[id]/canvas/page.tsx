@@ -24,7 +24,40 @@ interface A2UIRowComponent {
   };
 }
 
-type A2UIComponentDef = A2UITextComponent | A2UIColumnComponent | A2UIRowComponent;
+interface A2UIButtonAction {
+  name: string;
+  context?: Array<{ key: string; value: { path?: string; literalString?: string } }>;
+}
+
+interface A2UIButtonComponent {
+  Button: {
+    child: string;              // Component ID for button label (usually a Text)
+    primary?: boolean;
+    action: A2UIButtonAction;
+  };
+}
+
+interface A2UILinkComponent {
+  Link: {
+    text: { literalString: string };
+    actionName: string;
+    usageHint?: "nav" | "inline";
+  };
+}
+
+interface A2UIDividerComponent {
+  Divider: {
+    axis?: "horizontal" | "vertical";
+  };
+}
+
+type A2UIComponentDef =
+  | A2UITextComponent
+  | A2UIColumnComponent
+  | A2UIRowComponent
+  | A2UIButtonComponent
+  | A2UILinkComponent
+  | A2UIDividerComponent;
 
 interface A2UIComponent {
   id: string;
@@ -113,9 +146,13 @@ function extractA2UIFromCodeFence(text: string): A2UIEvent[] {
 function RenderComponent({
   componentId,
   components,
+  onAction,
+  surfaceId,
 }: {
   componentId: string;
   components: Map<string, A2UIComponent>;
+  onAction?: (actionName: string, surfaceId: string) => void;
+  surfaceId?: string;
 }) {
   const entry = components.get(componentId);
   if (!entry) return null;
@@ -189,12 +226,89 @@ function RenderComponent({
     }
   }
 
+  if ("Button" in def) {
+    const { child, primary, action } = def.Button;
+    const isPrimary = primary !== false; // default true
+    const style = isPrimary
+      ? { bg: "rgba(0,200,83,0.15)", border: "var(--arcade-green)", glow: "0 0 6px var(--arcade-green)" }
+      : { bg: "rgba(0,170,255,0.10)", border: "var(--arcade-blue)", glow: "none" };
+    return (
+      <button
+        onClick={() => onAction?.(action.name, surfaceId || "")}
+        className="pixel-font"
+        style={{
+          fontSize: "9px",
+          letterSpacing: "0.1em",
+          textTransform: "uppercase",
+          color: style.border,
+          background: style.bg,
+          border: `2px solid ${style.border}`,
+          padding: "8px 16px",
+          cursor: "pointer",
+          boxShadow: style.glow,
+          transition: "background 0.15s, box-shadow 0.15s",
+          fontFamily: "inherit",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "6px",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = style.border;
+          e.currentTarget.style.color = "#000";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = style.bg;
+          e.currentTarget.style.color = style.border;
+        }}
+      >
+        <RenderComponent componentId={child} components={components} onAction={onAction} surfaceId={surfaceId} />
+      </button>
+    );
+  }
+
+  if ("Link" in def) {
+    const { text, actionName, usageHint } = def.Link;
+    const isNav = usageHint === "nav";
+    return (
+      <span
+        onClick={() => onAction?.(actionName, surfaceId || "")}
+        style={{
+          fontSize: isNav ? "12px" : "13px",
+          color: "var(--arcade-blue)",
+          fontFamily: "var(--font-mono, monospace)",
+          cursor: "pointer",
+          textDecoration: "none",
+          lineHeight: 1.6,
+          display: isNav ? "block" : "inline",
+          padding: isNav ? "4px 0" : "0",
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
+      >
+        {text.literalString}
+      </span>
+    );
+  }
+
+  if ("Divider" in def) {
+    return (
+      <hr
+        style={{
+          border: "none",
+          borderTop: "1px solid var(--arcade-border-color, rgba(255,255,255,0.12))",
+          margin: "8px 0",
+          width: "100%",
+        }}
+      />
+    );
+  }
+
   if ("Column" in def) {
     const childIds = def.Column.children.explicitList;
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
         {childIds.map((cid) => (
-          <RenderComponent key={cid} componentId={cid} components={components} />
+          <RenderComponent key={cid} componentId={cid} components={components} onAction={onAction} surfaceId={surfaceId} />
         ))}
       </div>
     );
@@ -213,7 +327,7 @@ function RenderComponent({
         }}
       >
         {childIds.map((cid) => (
-          <RenderComponent key={cid} componentId={cid} components={components} />
+          <RenderComponent key={cid} componentId={cid} components={components} onAction={onAction} surfaceId={surfaceId} />
         ))}
       </div>
     );
@@ -224,7 +338,7 @@ function RenderComponent({
 
 // ─── Surface Renderer ───────────────────────────────────────────────
 
-function SurfaceView({ surface }: { surface: Surface }) {
+function SurfaceView({ surface, onAction }: { surface: Surface; onAction?: (actionName: string, surfaceId: string) => void }) {
   if (!surface.root) {
     return (
       <div
@@ -246,6 +360,8 @@ function SurfaceView({ surface }: { surface: Surface }) {
       <RenderComponent
         componentId={surface.root}
         components={surface.components}
+        onAction={onAction}
+        surfaceId={surface.id}
       />
     </div>
   );
@@ -269,6 +385,7 @@ export default function CanvasPage() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const surfacesRef = useRef<Map<string, Surface>>(new Map());
+  const sessionKeyRef = useRef<string | null>(null);
 
   const processEvent = useCallback((event: A2UIEvent) => {
     const current = surfacesRef.current;
@@ -394,6 +511,25 @@ export default function CanvasPage() {
             if (frame.ok) {
               handshakeComplete = true;
               setStatus("connected");
+              // Extract sessionKey for sending canvas actions back to agent
+              try {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (window as any).__canvasConnectFrame = frame;
+                const result = frame.result || frame.data || frame.payload || frame;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (window as any).__canvasConnectResult = result;
+                const mainKey = result?.snapshot?.sessionDefaults?.mainSessionKey
+                  || result?.sessionDefaults?.mainSessionKey
+                  || result?.mainSessionKey;
+                if (mainKey) {
+                  sessionKeyRef.current = mainKey;
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  (window as any).__canvasSessionKey = mainKey;
+                } else {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  (window as any).__canvasSessionKey = "NOT_FOUND";
+                }
+              } catch { /* ignore missing sessionKey */ }
             } else {
               setStatus("error");
               setErrorMsg(frame.error?.message || "Connect failed");
@@ -477,6 +613,24 @@ export default function CanvasPage() {
       }
     };
   }, [id, tokenFromUrl, processEvent]);
+
+  const sendCanvasAction = useCallback((actionName: string, surfaceId: string) => {
+    const ws = wsRef.current;
+    const sessionKey = sessionKeyRef.current;
+    console.log("[Canvas] Action clicked:", actionName, "surface:", surfaceId, "ws:", !!ws, "wsState:", ws?.readyState, "sessionKey:", sessionKey);
+    if (!ws || ws.readyState !== WebSocket.OPEN || !sessionKey) return;
+
+    const req = {
+      type: "req",
+      id: `canvas-action-${Date.now()}`,
+      method: "chat.send",
+      params: {
+        sessionKey,
+        message: `[Canvas] ${actionName}`,
+      },
+    };
+    ws.send(JSON.stringify(req));
+  }, []);
 
   useEffect(() => {
     // Store token in localStorage for OpenClaw auth (consistent with proxy.ts)
@@ -649,7 +803,7 @@ export default function CanvasPage() {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           {surfaceList.map((surface) => (
-            <SurfaceView key={surface.id} surface={surface} />
+            <SurfaceView key={surface.id} surface={surface} onAction={sendCanvasAction} />
           ))}
         </div>
       )}
