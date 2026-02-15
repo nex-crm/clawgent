@@ -133,6 +133,16 @@ const PERSONAS: Persona[] = [
     recommendedModel: "anthropic",
     sprite: "/sprites/character-9.png",
   },
+  {
+    id: "crm-agent",
+    name: "CRM AGENT",
+    tagline: "Your CRM that talks back and never lets anything slip",
+    icon: "\uD83E\uDD1D",
+    color: "arcade-yellow",
+    skills: buildSkillSummaries("crm-agent"),
+    recommendedModel: "anthropic",
+    sprite: null,
+  },
 ];
 
 // ─── Provider Config ────────────────────────────────────────────────
