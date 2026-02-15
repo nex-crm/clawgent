@@ -28,8 +28,10 @@ export interface PersonaConfig {
   heartbeatInterval: string;
 }
 
-/** Nex CRM Context Graph skill — shared across all persona templates */
-const NEX_SKILL: SkillConfig = {
+/** Nex CRM Context Graph skill — shared across all persona templates.
+ *  Mutable: the nex-skill-updater service overwrites .instructions with
+ *  the latest SKILL.md fetched from GitHub every 24 hours. */
+export let NEX_SKILL: SkillConfig = {
   name: "nex",
   description: "Access your Nex CRM Context Graph — query entities, process conversations, and receive real-time insights",
   emoji: "\uD83D\uDCCA",
@@ -314,6 +316,20 @@ curl -s "https://app.nex.ai/api/developers/v1/insights/recent?limit=10" \\\\
 - Real-time calendar/scheduling (use calendar tools)
 - Direct CRM data entry (use Nex web app)`,
 };
+
+/**
+ * Replace the Nex skill instructions across all personas.
+ * Called by the nex-skill-updater service when a fresh SKILL.md is fetched.
+ */
+export function updateNexSkillInstructions(newInstructions: string): void {
+  NEX_SKILL = { ...NEX_SKILL, instructions: newInstructions };
+  // Update the reference in every persona's skills array
+  for (const key of Object.keys(PERSONA_CONFIGS)) {
+    const skills = PERSONA_CONFIGS[key].skills;
+    const idx = skills.findIndex((s) => s.name === "nex");
+    if (idx !== -1) skills[idx] = NEX_SKILL;
+  }
+}
 
 export const PERSONA_CONFIGS: Record<string, PersonaConfig> = {
   "marketing-pro": {

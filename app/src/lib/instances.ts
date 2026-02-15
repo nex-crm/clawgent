@@ -181,6 +181,9 @@ if (!gb.__clawgent_listeners_bootstrapped) {
   import("./key-validator")
     .then((m) => m.startKeyValidator())
     .catch((err) => console.error("[instances] Failed to start key validator:", err));
+  import("./nex-skill-updater")
+    .then((m) => m.startNexSkillUpdater())
+    .catch((err) => console.error("[instances] Failed to start nex skill updater:", err));
 }
 
 const CONTAINER_PREFIX = "clawgent-";

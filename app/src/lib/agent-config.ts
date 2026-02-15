@@ -139,7 +139,7 @@ export async function configureAgentPersona(
   }
 }
 
-function buildSkillMd(skill: SkillConfig): string {
+export function buildSkillMd(skill: SkillConfig): string {
   const metadata: Record<string, unknown> = {
     openclaw: {
       emoji: skill.emoji,

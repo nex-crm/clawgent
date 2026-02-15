@@ -17,6 +17,8 @@ import { dbGetActiveWaSessions, dbGetWaSession } from "./db";
 
 type JsonObject = Record<string, unknown>;
 
+const POLL_INTERVAL = 2 * 60 * 1000; // 2 minutes
+
 interface ListenerState {
   phone: string;
   instanceId: string;
@@ -24,6 +26,9 @@ interface ListenerState {
   token: string;
   client: OpenClawClient;
   reconnectTimer: ReturnType<typeof setTimeout> | null;
+  pollTimer: ReturnType<typeof setInterval> | null;
+  /** Unix epoch (ms) of the last message we saw — used by poll dedup */
+  lastSeenTs: number;
   stopped: boolean;
 }
 
@@ -58,7 +63,7 @@ export function startInstanceListener(instanceId: string, port: number, token: s
     return;
   }
 
-  const client = new OpenClawClient({ port, token, clientId: "wa-proactive-listener" });
+  const client = new OpenClawClient({ port, token, clientId: "openclaw-control-ui" });
   const state: ListenerState = {
     client,
     phone,
@@ -66,6 +71,8 @@ export function startInstanceListener(instanceId: string, port: number, token: s
     port,
     token,
     reconnectTimer: null,
+    pollTimer: null,
+    lastSeenTs: Date.now(),
     stopped: false,
   };
 
@@ -82,6 +89,10 @@ export function stopInstanceListener(instanceId: string): void {
   if (state.reconnectTimer) {
     clearTimeout(state.reconnectTimer);
     state.reconnectTimer = null;
+  }
+  if (state.pollTimer) {
+    clearInterval(state.pollTimer);
+    state.pollTimer = null;
   }
   state.client.close();
   listeners.delete(instanceId);
@@ -102,7 +113,7 @@ async function connectListener(state: ListenerState, attempt: number): Promise<v
   const client = new OpenClawClient({
     port: state.port,
     token: state.token,
-    clientId: "wa-proactive-listener",
+    clientId: "openclaw-control-ui",
   });
   state.client = client;
 
@@ -147,6 +158,8 @@ async function connectListener(state: ListenerState, attempt: number): Promise<v
             // Dynamic import to avoid circular dependency with whatsapp.ts
             const { sendPlivoMessage } = await import("./whatsapp");
             await sendPlivoMessage(state.phone, message);
+            // Update poll timestamp so the poller doesn't re-forward this message
+            state.lastSeenTs = Date.now();
             console.log(`[listener] Forwarded proactive message from instance ${state.instanceId} to WA`);
           }
         } catch (err) {
@@ -158,13 +171,97 @@ async function connectListener(state: ListenerState, attempt: number): Promise<v
     // Listen for connection close to trigger reconnect
     client.on("_close", () => {
       if (state.stopped) return;
+      // Stop polling while disconnected — will restart on reconnect
+      if (state.pollTimer) {
+        clearInterval(state.pollTimer);
+        state.pollTimer = null;
+      }
       console.log(`[listener] Connection lost for instance ${state.instanceId}, scheduling reconnect`);
       scheduleReconnect(state, 0);
     });
 
+    // --- Polling fallback for heartbeat/proactive messages ---
+    // The WebSocket "chat" event only fires for user-initiated runs.
+    // Heartbeats run autonomously inside the container and don't emit
+    // chat events to external WebSocket clients. Poll chat.history
+    // periodically to catch messages the WebSocket listener misses.
+    if (state.pollTimer) {
+      clearInterval(state.pollTimer);
+    }
+    state.pollTimer = setInterval(() => {
+      pollForProactiveMessages(state).catch((err) => {
+        console.error(`[listener] Poll error for instance ${state.instanceId}:`, err);
+      });
+    }, POLL_INTERVAL);
+    if (state.pollTimer && typeof state.pollTimer === "object" && "unref" in state.pollTimer) {
+      (state.pollTimer as NodeJS.Timeout).unref();
+    }
+
   } catch (err) {
     console.error(`[listener] Connection failed for instance ${state.instanceId}:`, err);
     scheduleReconnect(state, attempt);
+  }
+}
+
+/**
+ * Poll chat.history for messages the WebSocket listener missed
+ * (e.g. heartbeat output, cron-triggered responses).
+ *
+ * OpenClaw message schema: { role, content, timestamp (unix ms), ... }
+ * Messages are ordered oldest-first in the array.
+ */
+async function pollForProactiveMessages(state: ListenerState): Promise<void> {
+  if (state.stopped) return;
+
+  const { client } = state;
+  if (!client.sessionKey) return;
+
+  try {
+    const res = await client.request("chat.history", { sessionKey: client.sessionKey, limit: 5 });
+    const messages = (res as JsonObject)?.messages as JsonObject[] | undefined;
+    if (!Array.isArray(messages) || messages.length === 0) return;
+
+    // Walk messages newest-first (array is oldest-first)
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role !== "assistant") continue;
+
+      const ts = msg.timestamp as number | undefined;
+      if (!ts || typeof ts !== "number") continue;
+
+      // Skip messages we've already seen
+      if (ts <= state.lastSeenTs) break;
+
+      // Skip messages from tracked outbound (user-initiated) runs
+      const runId = msg.runId as string | undefined;
+      if (runId && outboundRuns.has(runId)) continue;
+
+      const text = extractMessageText(msg);
+      if (!text) continue;
+
+      // Forward to WhatsApp
+      const inst = instances.get(state.instanceId);
+      const agentDisplay = getAgentDisplay(inst);
+      const message = `${text}\n\n— _${agentDisplay}_`;
+
+      const { sendPlivoMessage } = await import("./whatsapp");
+      await sendPlivoMessage(state.phone, message);
+      console.log(`[listener] Forwarded proactive message (poll) from instance ${state.instanceId} to WA`);
+
+      // Update to this message's timestamp
+      state.lastSeenTs = ts;
+      break; // Only forward the most recent new message per poll cycle
+    }
+
+    // Always advance to the newest message timestamp to avoid re-scanning
+    const newestMsg = messages[messages.length - 1];
+    const newestTs = newestMsg?.timestamp as number | undefined;
+    if (typeof newestTs === "number" && newestTs > state.lastSeenTs) {
+      state.lastSeenTs = newestTs;
+    }
+  } catch (err) {
+    // Non-fatal: connection may have dropped between check and request
+    console.warn(`[listener] Poll request failed for instance ${state.instanceId}:`, err);
   }
 }
 
