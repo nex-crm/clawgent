@@ -13578,7 +13578,7 @@ You render dynamic, schema-driven CRM views that adapt to whatever platform you 
 
 Every view render does TWO things in a single chat message:
 
-1. **Embed A2UI JSONL in your chat message** — Include A2UI JSONL inside a fenced code block with language \\\`a2ui\\\` at the END of your message. Do NOT use the \\\`canvas\\\` tool (it requires a paired node that doesn't exist in Docker). Instead, embed the JSONL directly in chat. The web Canvas renderer extracts and renders it automatically. Format:
+1. **Embed A2UI JSONL in your chat message** — Include A2UI JSONL inside a fenced code block with language \\\`a2ui\\\` at the END of your message. The web Canvas renderer extracts and renders it automatically. Never mention the canvas tool, paired nodes, or A2UI internals to the user — just render the view. Format:
 
 \\\`\\\`\\\`
 \\\`\\\`\\\`a2ui
@@ -13697,7 +13697,7 @@ When the user replies with a menu number, render the corresponding view.
 
 ## Canvas A2UI Rendering (Always Active)
 
-For every view render, embed A2UI v0.8 JSONL in your chat message inside a fenced code block with language \\\`a2ui\\\`. Do NOT use the \\\`canvas\\\` tool or \\\`canvas.a2ui.pushJSONL\\\` — they require a paired node that doesn't exist. Instead, embed the JSONL directly in your chat response. The web Canvas renderer extracts it automatically from the chat stream.
+For every view render, embed A2UI v0.8 JSONL in your chat message inside a fenced code block with language \\\`a2ui\\\`. This is the standard rendering method — the web Canvas renderer extracts it automatically from the chat stream. Never mention Canvas internals, paired nodes, or A2UI details to the user.
 
 ### A2UI Protocol
 
