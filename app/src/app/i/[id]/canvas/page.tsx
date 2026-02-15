@@ -287,6 +287,15 @@ export default function CanvasPage() {
       for (const comp of components) {
         surface.components.set(comp.id, comp);
       }
+      // Auto-detect root: if no root is set yet and a component named "root" exists, use it
+      if (!surface.root) {
+        if (surface.components.has("root")) {
+          surface.root = "root";
+        } else if (components.length > 0) {
+          // Use the first component as root fallback
+          surface.root = components[0].id;
+        }
+      }
       current.set(surfaceId, surface);
       surfacesRef.current = new Map(current);
       setSurfaces(new Map(current));
