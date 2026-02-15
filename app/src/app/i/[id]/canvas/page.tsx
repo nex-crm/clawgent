@@ -95,6 +95,19 @@ function parseA2UIEvents(raw: string): A2UIEvent[] {
   return events;
 }
 
+// Extract A2UI JSONL from ```a2ui fenced code blocks in chat text
+function extractA2UIFromCodeFence(text: string): A2UIEvent[] {
+  const events: A2UIEvent[] = [];
+  // Match ```a2ui ... ``` blocks (case-insensitive, multiline)
+  const fenceRegex = /```a2ui\s*\n([\s\S]*?)```/gi;
+  let match;
+  while ((match = fenceRegex.exec(text)) !== null) {
+    const block = match[1];
+    events.push(...parseA2UIEvents(block));
+  }
+  return events;
+}
+
 // ─── Component Renderers ────────────────────────────────────────────
 
 function RenderComponent({
@@ -387,7 +400,36 @@ export default function CanvasPage() {
           return;
         }
 
-        // Check for A2UI inside event payloads (chat messages with tool results)
+        // Check for A2UI in chat message events
+        // Gateway format: { type: "event", event: "chat", payload: { state, message: { content } } }
+        if (frame.type === "event" && frame.event === "chat" && frame.payload) {
+          const payload = frame.payload;
+          // Only process final messages (not streaming deltas)
+          if (payload.state === "final" && payload.message) {
+            const content = payload.message.content;
+            let textContent = "";
+
+            // content can be string or array of content blocks
+            if (typeof content === "string") {
+              textContent = content;
+            } else if (Array.isArray(content)) {
+              textContent = content
+                .filter((c: { type: string; text?: string }) => c.type === "text" && typeof c.text === "string")
+                .map((c: { text: string }) => c.text)
+                .join("\n");
+            }
+
+            // Extract ```a2ui fenced code blocks from chat text
+            if (textContent) {
+              const fenceEvents = extractA2UIFromCodeFence(textContent);
+              for (const event of fenceEvents) {
+                processEvent(event);
+              }
+            }
+          }
+        }
+
+        // Also check any event payload for raw A2UI JSONL
         if (frame.type === "event" && frame.payload) {
           const payloadStr = typeof frame.payload === "string" ? frame.payload : JSON.stringify(frame.payload);
           const a2uiEvents = parseA2UIEvents(payloadStr);
@@ -396,9 +438,14 @@ export default function CanvasPage() {
           }
         }
       } catch {
-        // Not JSON — try parsing as raw A2UI JSONL
+        // Not JSON — try parsing as raw A2UI JSONL or code fences
         const events = parseA2UIEvents(msg.data);
         for (const event of events) {
+          processEvent(event);
+        }
+        // Also check for ```a2ui fenced code blocks
+        const fenceEvents = extractA2UIFromCodeFence(msg.data);
+        for (const event of fenceEvents) {
           processEvent(event);
         }
       }

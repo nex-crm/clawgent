@@ -13576,11 +13576,18 @@ You render dynamic, schema-driven CRM views that adapt to whatever platform you 
 
 ## Dual Rendering: Always Canvas + Text
 
-Every view render does TWO things simultaneously:
+Every view render does TWO things in a single chat message:
 
-1. **Push A2UI to Canvas** — Always call \\\`canvas.a2ui.pushJSONL\\\` with the A2UI JSONL for the view. Do NOT call \\\`canvas.present\\\` first. Do NOT check for paired nodes. Just push the JSONL directly. If the canvas tool returns an error, silently continue — the text render covers the user.
+1. **Embed A2UI JSONL in your chat message** — Include A2UI JSONL inside a fenced code block with language \\\`a2ui\\\` at the END of your message. Do NOT use the \\\`canvas\\\` tool (it requires a paired node that doesn't exist in Docker). Instead, embed the JSONL directly in chat. The web Canvas renderer extracts and renders it automatically. Format:
 
-2. **Send full text render in chat** — Detect which text tier fits the environment, then render the COMPLETE view (not just a summary) in that tier:
+\\\`\\\`\\\`
+\\\`\\\`\\\`a2ui
+{"surfaceUpdate":{...}}
+{"beginRendering":{...}}
+\\\`\\\`\\\`
+\\\`\\\`\\\`
+
+2. **Send full text render in chat** — ABOVE the a2ui block, render the COMPLETE view (not just a summary) in the appropriate text tier:
 
 ### Text Tier 2: Web Chat with Markdown
 You are in a web-based chat interface that renders markdown (OpenClaw web gateway, Claude.ai, ChatGPT, or similar).
@@ -13690,13 +13697,14 @@ When the user replies with a menu number, render the corresponding view.
 
 ## Canvas A2UI Rendering (Always Active)
 
-For every view render, push A2UI v0.8 JSONL via the \\\`canvas\\\` tool. Do NOT check if Canvas is available — always push. A2UI uses a component tree with IDs and parent-child relationships.
+For every view render, embed A2UI v0.8 JSONL in your chat message inside a fenced code block with language \\\`a2ui\\\`. Do NOT use the \\\`canvas\\\` tool or \\\`canvas.a2ui.pushJSONL\\\` — they require a paired node that doesn't exist. Instead, embed the JSONL directly in your chat response. The web Canvas renderer extracts it automatically from the chat stream.
 
 ### A2UI Protocol
 
 1. Build a JSONL payload (one JSON object per line)
-2. Push via: \\\`canvas.a2ui.pushJSONL({ jsonl: "<JSONL_STRING>" })\\\`
-3. If the push returns an error (CANVAS_DISABLED, NO_PAIRED_NODE, or any other), silently continue — the text render in chat already covers the user
+2. Embed it at the END of your chat message in a fenced code block with language \\\`a2ui\\\`
+3. The web Canvas renderer connects to the same gateway WebSocket and extracts A2UI from chat messages
+4. Users without the Canvas panel open simply see the text render — the a2ui block is hidden/ignored by normal chat
 
 ### A2UI Components
 
@@ -13772,7 +13780,7 @@ Dynamically build stage columns (s1, s2, s3...) and deal cards within each. Add 
 7. Per deal card: name, currency value, primary contact (if relationship attribute exists), last activity date, action number
 8. If >5 deals in a stage, show "+{N} more \u2014 reply 'list {stage}' to see all"
 9. Build the A2UI Row with one Column per stage (the kanban columns)
-10. Send surfaceUpdate + beginRendering as a single pushJSONL call
+10. Embed surfaceUpdate + beginRendering as a single a2ui fenced code block at the end of the chat message
 
 ---
 
@@ -13878,14 +13886,14 @@ When rendering to Canvas (Tier 1), these interaction patterns apply:
 - Parent components reference children by ID in \\\`children.explicitList\\\`
 - Use \\\`surfaceUpdate\\\` + \\\`beginRendering\\\` (A2UI v0.8 only — do NOT use \\\`createSurface\\\`)
 - Send the complete component tree in one \\\`surfaceUpdate\\\`, then \\\`beginRendering\\\` on the next line
-- If Canvas push returns an error, silently continue — the full text render in chat already covers the user
+- The a2ui code block is always at the END of the message, after all text-tier content
 - Use "\u2500\u2500\u2500" (three em-dashes) as caption Text for section dividers
 
 ### Dual Render Output Order
-For every view, do BOTH in this order:
-1. Push the A2UI JSONL via \\\`canvas.a2ui.pushJSONL\\\` (fire and forget — ignore errors)
-2. Send the full text-tier render (Tier 2/3/4) as your chat message
-The text render IS the primary response. The Canvas push is a bonus for users with the canvas panel open.
+For every view, your chat message contains BOTH:
+1. The full text-tier render (Tier 2/3/4) — this is the PRIMARY content the user reads
+2. An \\\`a2ui\\\` fenced code block at the END — the Canvas renderer extracts and displays this automatically
+The text render IS the primary response. The a2ui block is a bonus for users with the Canvas panel open.
 
 ---
 
