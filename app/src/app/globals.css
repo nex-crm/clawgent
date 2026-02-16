@@ -1843,7 +1843,36 @@ body::after {
   }
 }
 
-/* --- 16. Selection Styling ---------------------------------- */
+/* --- 16. Canvas Animations ---------------------------------- */
+@keyframes canvas-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes canvas-fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Pipeline kanban horizontal scrollbar */
+.canvas-kanban-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--arcade-yellow) var(--arcade-bg-panel);
+}
+
+.canvas-kanban-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+
+.canvas-kanban-scroll::-webkit-scrollbar-track {
+  background: var(--arcade-bg-panel);
+}
+
+.canvas-kanban-scroll::-webkit-scrollbar-thumb {
+  background: var(--arcade-yellow);
+}
+
+/* --- 17. Selection Styling ---------------------------------- */
 ::selection {
   background: var(--arcade-yellow);
   color: #000000;

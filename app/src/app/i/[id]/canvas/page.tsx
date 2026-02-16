@@ -141,6 +141,34 @@ function extractA2UIFromCodeFence(text: string): A2UIEvent[] {
   return events;
 }
 
+// ─── Utilities ─────────────────────────────────────────────────────
+
+function stripNumberPrefix(text: string): string {
+  return text.replace(/^\[\d+\]\s*/, "");
+}
+
+// ─── Loading Skeleton ──────────────────────────────────────────────
+
+function LoadingSkeleton({ lines = 5 }: { lines?: number }) {
+  const widths = ["85%", "60%", "72%", "45%", "90%", "55%"];
+  return (
+    <div className="arcade-panel" style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+      {Array.from({ length: lines }).map((_, i) => (
+        <div
+          key={i}
+          style={{
+            height: "12px",
+            width: widths[i % widths.length],
+            background: "rgba(255,255,255,0.06)",
+            animation: "canvas-pulse 1.5s ease-in-out infinite",
+            animationDelay: `${i * 0.15}s`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 // ─── Component Renderers ────────────────────────────────────────────
 
 function RenderComponent({
@@ -269,23 +297,56 @@ function RenderComponent({
   if ("Link" in def) {
     const { text, actionName, usageHint } = def.Link;
     const isNav = usageHint === "nav";
+    const label = stripNumberPrefix(text.literalString);
+    if (isNav) {
+      return (
+        <span
+          onClick={() => onAction?.(actionName, surfaceId || "")}
+          className="pixel-font"
+          style={{
+            fontSize: "9px",
+            letterSpacing: "0.08em",
+            color: "var(--arcade-blue)",
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            border: "1px solid var(--arcade-blue)",
+            padding: "4px 10px",
+            marginRight: "6px",
+            marginBottom: "4px",
+            textTransform: "uppercase",
+            transition: "background 0.15s, border-color 0.15s",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = "var(--arcade-yellow)";
+            e.currentTarget.style.background = "rgba(0,160,248,0.08)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = "var(--arcade-blue)";
+            e.currentTarget.style.background = "transparent";
+          }}
+        >
+          {label}
+        </span>
+      );
+    }
     return (
       <span
         onClick={() => onAction?.(actionName, surfaceId || "")}
         style={{
-          fontSize: isNav ? "12px" : "13px",
+          fontSize: "13px",
           color: "var(--arcade-blue)",
           fontFamily: "var(--font-mono, monospace)",
           cursor: "pointer",
           textDecoration: "none",
           lineHeight: 1.6,
-          display: isNav ? "block" : "inline",
-          padding: isNav ? "4px 0" : "0",
+          display: "inline",
+          padding: "0",
         }}
         onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
         onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
       >
-        {text.literalString}
+        {label}
       </span>
     );
   }
@@ -305,8 +366,12 @@ function RenderComponent({
 
   if ("Column" in def) {
     const childIds = def.Column.children.explicitList;
+    const isCard = /^(tc-|ins-|fu-|s\d+-d)/.test(componentId);
+    const cardStyle = isCard
+      ? { padding: "10px 12px", border: "1px solid var(--arcade-border-color)", background: "rgba(255,255,255,0.02)", marginBottom: "2px" }
+      : {};
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px", ...cardStyle }}>
         {childIds.map((cid) => (
           <RenderComponent key={cid} componentId={cid} components={components} onAction={onAction} surfaceId={surfaceId} />
         ))}
@@ -316,18 +381,23 @@ function RenderComponent({
 
   if ("Row" in def) {
     const childIds = def.Row.children.explicitList;
+    const isKanban = componentId === "board" && childIds.length >= 3;
     return (
       <div
+        className={isKanban ? "canvas-kanban-scroll" : undefined}
         style={{
           display: "flex",
           flexDirection: "row",
           gap: "12px",
-          flexWrap: "wrap",
+          flexWrap: isKanban ? "nowrap" : "wrap",
           alignItems: "flex-start",
+          ...(isKanban ? { overflowX: "auto", paddingBottom: "4px" } : {}),
         }}
       >
         {childIds.map((cid) => (
-          <RenderComponent key={cid} componentId={cid} components={components} onAction={onAction} surfaceId={surfaceId} />
+          <div key={cid} style={isKanban ? { minWidth: "200px", flex: "1 0 200px" } : undefined}>
+            <RenderComponent componentId={cid} components={components} onAction={onAction} surfaceId={surfaceId} />
+          </div>
         ))}
       </div>
     );
@@ -387,6 +457,17 @@ export default function CanvasPage() {
   const surfacesRef = useRef<Map<string, Surface>>(new Map());
   const sessionKeyRef = useRef<string | null>(null);
 
+  const NAV_ITEMS = [
+    { id: "digest", label: "HOME", icon: "\u{1F3E0}", actionName: "view-digest" },
+    { id: "pipeline", label: "PIPELINE", icon: "\u{1F4CA}", actionName: "view-pipeline" },
+    { id: "followups", label: "FOLLOW-UPS", icon: "\u{23F0}", actionName: "view-followups" },
+    { id: "insights", label: "INSIGHTS", icon: "\u{1F4A1}", actionName: "view-insights" },
+  ];
+
+  const [currentView, setCurrentView] = useState("digest");
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const transitionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const processEvent = useCallback((event: A2UIEvent) => {
     const current = surfacesRef.current;
 
@@ -416,6 +497,17 @@ export default function CanvasPage() {
       current.set(surfaceId, surface);
       surfacesRef.current = new Map(current);
       setSurfaces(new Map(current));
+
+      // Derive currentView from surfaceId
+      const knownViews = ["digest", "pipeline", "followups", "insights"];
+      if (knownViews.includes(surfaceId)) {
+        setCurrentView(surfaceId);
+        setIsTransitioning(false);
+        if (transitionTimer.current) {
+          clearTimeout(transitionTimer.current);
+          transitionTimer.current = null;
+        }
+      }
     }
 
     if ("beginRendering" in event) {
@@ -528,6 +620,7 @@ export default function CanvasPage() {
                 } else {
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   (window as any).__canvasSessionKey = "NOT_FOUND";
+                  setErrorMsg("Session key not found — Canvas interactions may not work");
                 }
               } catch { /* ignore missing sessionKey */ }
             } else {
@@ -536,6 +629,19 @@ export default function CanvasPage() {
             }
             return;
           }
+        }
+
+        // Canvas action acknowledgment
+        if (frame.type === "res" && typeof frame.id === "string" && frame.id.startsWith("canvas-action-")) {
+          if (frame.ok) {
+            console.log("[Canvas] Action acknowledged:", frame.id);
+          } else {
+            const errMsg = frame.error?.message || "Action failed";
+            console.warn("[Canvas] Action failed:", frame.id, errMsg);
+            setErrorMsg(errMsg);
+            setTimeout(() => setErrorMsg(null), 3000);
+          }
+          return;
         }
 
         // After handshake: look for A2UI events in any message
@@ -599,10 +705,12 @@ export default function CanvasPage() {
     ws.onerror = () => {
       setStatus("error");
       setErrorMsg("WebSocket connection error");
+      setIsTransitioning(false);
     };
 
     ws.onclose = (e) => {
       setStatus("disconnected");
+      setIsTransitioning(false);
       wsRef.current = null;
 
       // Auto-reconnect after 3 seconds (unless intentionally closed)
@@ -631,6 +739,16 @@ export default function CanvasPage() {
     };
     ws.send(JSON.stringify(req));
   }, []);
+
+  const handleNavClick = useCallback((viewId: string, actionName: string) => {
+    setCurrentView(viewId);
+    setIsTransitioning(true);
+    if (transitionTimer.current) clearTimeout(transitionTimer.current);
+    transitionTimer.current = setTimeout(() => {
+      setIsTransitioning(false);
+    }, 10000);
+    sendCanvasAction(actionName, "");
+  }, [sendCanvasAction]);
 
   useEffect(() => {
     // Store token in localStorage for OpenClaw auth (consistent with proxy.ts)
@@ -674,62 +792,78 @@ export default function CanvasPage() {
         margin: "0 auto",
       }}
     >
-      {/* Header bar */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: "16px",
-          padding: "12px 16px",
-          border: "2px solid var(--arcade-border-color)",
-          background: "var(--arcade-bg-panel)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <span
-            className="pixel-font"
-            style={{
-              fontSize: "10px",
-              letterSpacing: "0.12em",
-              color: "var(--arcade-yellow)",
-              textTransform: "uppercase",
-            }}
-          >
-            CANVAS
-          </span>
-          <span
-            style={{
-              fontSize: "11px",
-              color: "rgba(255,255,255,0.3)",
-              fontFamily: "var(--font-mono, monospace)",
-            }}
-          >
-            {id.slice(0, 8)}...
-          </span>
+      {/* Condensed status bar + sticky nav */}
+      <div style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--arcade-bg)" }}>
+        {/* Status bar */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            padding: "6px 16px",
+            borderBottom: "1px solid var(--arcade-border-color)",
+          }}
+        >
+          <span className="pixel-font" style={{ fontSize: "8px", letterSpacing: "0.1em", color: "var(--arcade-yellow)" }}>CANVAS</span>
+          <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.2)", fontFamily: "var(--font-mono, monospace)" }}>|</span>
+          <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.25)", fontFamily: "var(--font-mono, monospace)" }}>{id.slice(0, 8)}</span>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px" }}>
+            <div
+              style={{
+                width: "6px",
+                height: "6px",
+                background: statusColor[status],
+                boxShadow: status === "connected" ? `0 0 4px ${statusColor[status]}` : "none",
+              }}
+            />
+            <span className="pixel-font" style={{ fontSize: "6px", color: statusColor[status], letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              {status}
+            </span>
+          </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <div
-            style={{
-              width: "8px",
-              height: "8px",
-              background: statusColor[status],
-              boxShadow: status === "connected"
-                ? `0 0 4px ${statusColor[status]}`
-                : "none",
-            }}
-          />
-          <span
-            className="pixel-font"
-            style={{
-              fontSize: "7px",
-              color: statusColor[status],
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
-            }}
-          >
-            {status}
-          </span>
+
+        {/* Nav bar */}
+        <div
+          style={{
+            display: "flex",
+            gap: "0",
+            borderBottom: "2px solid var(--arcade-border-color)",
+            background: "var(--arcade-bg-panel)",
+          }}
+        >
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => handleNavClick(item.id, item.actionName)}
+              className="pixel-font"
+              style={{
+                flex: 1,
+                padding: "8px 4px",
+                fontSize: "7px",
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                background: "transparent",
+                border: "none",
+                borderBottom: currentView === item.id ? "2px solid var(--arcade-yellow)" : "2px solid transparent",
+                color: currentView === item.id ? "var(--arcade-yellow)" : "rgba(255,255,255,0.35)",
+                cursor: "pointer",
+                transition: "color 0.15s",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "4px",
+              }}
+              onMouseEnter={(e) => {
+                if (currentView !== item.id) e.currentTarget.style.color = "rgba(255,255,255,0.6)";
+              }}
+              onMouseLeave={(e) => {
+                if (currentView !== item.id) e.currentTarget.style.color = "rgba(255,255,255,0.35)";
+              }}
+            >
+              <span style={{ fontSize: "10px" }}>{item.icon}</span>
+              <span>{item.label}</span>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -756,7 +890,11 @@ export default function CanvasPage() {
       )}
 
       {/* Surfaces */}
-      {surfaceList.length === 0 ? (
+      {isTransitioning ? (
+        <div style={{ marginTop: "12px" }}>
+          <LoadingSkeleton />
+        </div>
+      ) : surfaceList.length === 0 ? (
         <div
           className="arcade-panel"
           style={{
@@ -765,6 +903,7 @@ export default function CanvasPage() {
             flexDirection: "column",
             alignItems: "center",
             gap: "16px",
+            marginTop: "12px",
           }}
         >
           <span style={{ fontSize: "32px" }}>📡</span>
@@ -801,10 +940,13 @@ export default function CanvasPage() {
           )}
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          {surfaceList.map((surface) => (
-            <SurfaceView key={surface.id} surface={surface} onAction={sendCanvasAction} />
-          ))}
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "12px", animation: "canvas-fadeIn 0.3s ease-out" }}>
+          {surfaceList
+            .filter((s) => s.id === currentView || s.id.startsWith(currentView) || !["digest", "pipeline", "followups", "insights"].some((v) => surfaceList.some((ss) => ss.id === v || ss.id.startsWith(v))))
+            .slice(0, 5)
+            .map((surface) => (
+              <SurfaceView key={surface.id} surface={surface} onAction={sendCanvasAction} />
+            ))}
         </div>
       )}
 
