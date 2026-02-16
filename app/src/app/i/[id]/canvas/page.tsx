@@ -149,10 +149,25 @@ function stripNumberPrefix(text: string): string {
 
 // ─── Loading Skeleton ──────────────────────────────────────────────
 
-function LoadingSkeleton({ lines = 5 }: { lines?: number }) {
+function LoadingSkeleton({ label, lines = 5 }: { label?: string; lines?: number }) {
   const widths = ["85%", "60%", "72%", "45%", "90%", "55%"];
   return (
-    <div className="arcade-panel" style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+    <div className="arcade-panel" style={{ padding: "20px 16px", display: "flex", flexDirection: "column", gap: "10px" }}>
+      {label && (
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+          <div style={{
+            width: "6px", height: "6px",
+            background: "var(--arcade-yellow)",
+            animation: "canvas-pulse 1s ease-in-out infinite",
+          }} />
+          <span className="pixel-font" style={{
+            fontSize: "8px", letterSpacing: "0.1em", textTransform: "uppercase",
+            color: "var(--arcade-yellow)", animation: "canvas-pulse 1.5s ease-in-out infinite",
+          }}>
+            {label}
+          </span>
+        </div>
+      )}
       {Array.from({ length: lines }).map((_, i) => (
         <div
           key={i}
@@ -466,6 +481,7 @@ export default function CanvasPage() {
 
   const [currentView, setCurrentView] = useState("digest");
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [lastAction, setLastAction] = useState<string | null>(null);
   const transitionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const processEvent = useCallback((event: A2UIEvent) => {
@@ -498,15 +514,12 @@ export default function CanvasPage() {
       surfacesRef.current = new Map(current);
       setSurfaces(new Map(current));
 
-      // Derive currentView from surfaceId
-      const knownViews = ["digest", "pipeline", "followups", "insights"];
-      if (knownViews.includes(surfaceId)) {
-        setCurrentView(surfaceId);
-        setIsTransitioning(false);
-        if (transitionTimer.current) {
-          clearTimeout(transitionTimer.current);
-          transitionTimer.current = null;
-        }
+      // Update currentView to show the incoming surface
+      setCurrentView(surfaceId);
+      setIsTransitioning(false);
+      if (transitionTimer.current) {
+        clearTimeout(transitionTimer.current);
+        transitionTimer.current = null;
       }
     }
 
@@ -722,19 +735,57 @@ export default function CanvasPage() {
     };
   }, [id, tokenFromUrl, processEvent]);
 
-  const sendCanvasAction = useCallback((actionName: string, surfaceId: string) => {
+  const sendCanvasAction = useCallback((actionName: string, _surfaceId: string) => {
     const ws = wsRef.current;
     const sessionKey = sessionKeyRef.current;
-    console.log("[Canvas] Action clicked:", actionName, "surface:", surfaceId, "ws:", !!ws, "wsState:", ws?.readyState, "sessionKey:", sessionKey);
-    if (!ws || ws.readyState !== WebSocket.OPEN || !sessionKey) return;
 
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.warn("[Canvas] WS not open, state:", ws?.readyState, "— queueing retry");
+      // Retry once after 2s (WS may be reconnecting)
+      setTimeout(() => {
+        const ws2 = wsRef.current;
+        const sk2 = sessionKeyRef.current;
+        if (ws2 && ws2.readyState === WebSocket.OPEN && sk2) {
+          const retryId = `canvas-action-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          ws2.send(JSON.stringify({
+            type: "req", id: retryId, method: "chat.send",
+            params: { sessionKey: sk2, message: `[Canvas] ${actionName}`, idempotencyKey: retryId },
+          }));
+          setLastAction(actionName);
+          setTimeout(() => setLastAction(null), 3000);
+        } else {
+          setErrorMsg("Not connected — reload the page");
+          setTimeout(() => setErrorMsg(null), 4000);
+        }
+      }, 2000);
+      return;
+    }
+    if (!sessionKey) {
+      setErrorMsg("No session key — open chat first, then reload canvas");
+      setTimeout(() => setErrorMsg(null), 5000);
+      return;
+    }
+
+    setLastAction(actionName);
+    setTimeout(() => setLastAction(null), 3000);
+
+    // Show loading skeleton for navigation-type actions (view changes, browse, back)
+    const isNavAction = /^(view-|browse-|list-|back-|record-|search$)/.test(actionName);
+    if (isNavAction) {
+      setIsTransitioning(true);
+      if (transitionTimer.current) clearTimeout(transitionTimer.current);
+      transitionTimer.current = setTimeout(() => setIsTransitioning(false), 30000);
+    }
+
+    const actionId = `canvas-action-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const req = {
       type: "req",
-      id: `canvas-action-${Date.now()}`,
+      id: actionId,
       method: "chat.send",
       params: {
         sessionKey,
         message: `[Canvas] ${actionName}`,
+        idempotencyKey: actionId,
       },
     };
     ws.send(JSON.stringify(req));
@@ -746,7 +797,7 @@ export default function CanvasPage() {
     if (transitionTimer.current) clearTimeout(transitionTimer.current);
     transitionTimer.current = setTimeout(() => {
       setIsTransitioning(false);
-    }, 10000);
+    }, 30000);
     sendCanvasAction(actionName, "");
   }, [sendCanvasAction]);
 
@@ -889,66 +940,155 @@ export default function CanvasPage() {
         </div>
       )}
 
-      {/* Surfaces */}
-      {isTransitioning ? (
-        <div style={{ marginTop: "12px" }}>
-          <LoadingSkeleton />
-        </div>
-      ) : surfaceList.length === 0 ? (
-        <div
-          className="arcade-panel"
-          style={{
-            padding: "48px 24px",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "16px",
-            marginTop: "12px",
-          }}
-        >
-          <span style={{ fontSize: "32px" }}>📡</span>
-          <span
-            className="pixel-font"
-            style={{
-              fontSize: "9px",
-              color: "rgba(255,255,255,0.3)",
-              letterSpacing: "0.12em",
-              textAlign: "center",
-              lineHeight: 2,
-            }}
-          >
-            {status === "connected"
-              ? "WAITING FOR CANVAS DATA..."
-              : status === "connecting"
-                ? "CONNECTING TO INSTANCE..."
-                : "RECONNECTING..."}
+      {/* Action sent indicator */}
+      {lastAction && (
+        <div style={{ padding: "4px 16px", marginTop: "4px" }}>
+          <span className="pixel-font" style={{ fontSize: "7px", color: "var(--arcade-green)", letterSpacing: "0.08em" }}>
+            SENT: [Canvas] {lastAction}
           </span>
-          {status === "connected" && (
-            <span
-              style={{
-                fontSize: "11px",
-                color: "rgba(255,255,255,0.2)",
-                fontFamily: "var(--font-mono, monospace)",
-                textAlign: "center",
-                maxWidth: "360px",
-                lineHeight: 1.5,
-              }}
-            >
-              Canvas views will appear here when your agent uses the canvas
-              tool to render A2UI components.
-            </span>
-          )}
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "12px", animation: "canvas-fadeIn 0.3s ease-out" }}>
-          {surfaceList
-            .filter((s) => s.id === currentView || s.id.startsWith(currentView) || !["digest", "pipeline", "followups", "insights"].some((v) => surfaceList.some((ss) => ss.id === v || ss.id.startsWith(v))))
-            .slice(0, 5)
-            .map((surface) => (
-              <SurfaceView key={surface.id} surface={surface} onAction={sendCanvasAction} />
-            ))}
         </div>
       )}
+
+      {/* Surfaces */}
+      {(() => {
+        const matchedSurfaces = surfaceList.filter(
+          (s) => s.id === currentView || s.id.startsWith(currentView)
+        );
+        const activeNav = NAV_ITEMS.find((n) => n.id === currentView);
+
+        if (isTransitioning) {
+          const loadingLabel = activeNav
+            ? `Loading ${activeNav.label}...`
+            : "Loading...";
+          return (
+            <div style={{ marginTop: "12px" }}>
+              <LoadingSkeleton label={loadingLabel} />
+            </div>
+          );
+        }
+
+        if (surfaceList.length === 0) {
+          return (
+            <div
+              className="arcade-panel"
+              style={{
+                padding: "48px 24px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "16px",
+                marginTop: "12px",
+              }}
+            >
+              <span style={{ fontSize: "32px" }}>📡</span>
+              <span
+                className="pixel-font"
+                style={{
+                  fontSize: "9px",
+                  color: "rgba(255,255,255,0.3)",
+                  letterSpacing: "0.12em",
+                  textAlign: "center",
+                  lineHeight: 2,
+                }}
+              >
+                {status === "connected"
+                  ? "WAITING FOR CANVAS DATA..."
+                  : status === "connecting"
+                    ? "CONNECTING TO INSTANCE..."
+                    : "RECONNECTING..."}
+              </span>
+              {status === "connected" && (
+                <span
+                  style={{
+                    fontSize: "11px",
+                    color: "rgba(255,255,255,0.2)",
+                    fontFamily: "var(--font-mono, monospace)",
+                    textAlign: "center",
+                    maxWidth: "360px",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  Ask your agent for a daily digest to get started.
+                </span>
+              )}
+            </div>
+          );
+        }
+
+        if (matchedSurfaces.length === 0) {
+          return (
+            <div
+              className="arcade-panel"
+              style={{
+                padding: "32px 24px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "12px",
+                marginTop: "12px",
+              }}
+            >
+              <span style={{ fontSize: "24px" }}>{activeNav?.icon || "📋"}</span>
+              <span
+                className="pixel-font"
+                style={{
+                  fontSize: "8px",
+                  color: "rgba(255,255,255,0.35)",
+                  letterSpacing: "0.1em",
+                  textAlign: "center",
+                  lineHeight: 1.8,
+                  textTransform: "uppercase",
+                }}
+              >
+                No {activeNav?.label || currentView} data yet
+              </span>
+              <span
+                style={{
+                  fontSize: "11px",
+                  color: "rgba(255,255,255,0.2)",
+                  fontFamily: "var(--font-mono, monospace)",
+                  textAlign: "center",
+                  maxWidth: "320px",
+                  lineHeight: 1.5,
+                }}
+              >
+                {currentView === "digest"
+                  ? "Ask your agent for a daily digest."
+                  : currentView === "pipeline"
+                    ? "Ask your agent to show the pipeline."
+                    : currentView === "followups"
+                      ? "Ask your agent to show follow-ups."
+                      : "Ask your agent to show insights."}
+              </span>
+              <button
+                onClick={() => handleNavClick(currentView, activeNav?.actionName || `view-${currentView}`)}
+                className="pixel-font"
+                style={{
+                  fontSize: "8px",
+                  letterSpacing: "0.1em",
+                  color: "var(--arcade-blue)",
+                  background: "rgba(0,160,248,0.08)",
+                  border: "1px solid var(--arcade-blue)",
+                  padding: "6px 16px",
+                  cursor: "pointer",
+                  textTransform: "uppercase",
+                  marginTop: "4px",
+                }}
+              >
+                Request {activeNav?.label || currentView}
+              </button>
+            </div>
+          );
+        }
+
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "12px", animation: "canvas-fadeIn 0.3s ease-out" }}>
+            {matchedSurfaces.slice(0, 5).map((surface) => (
+              <SurfaceView key={surface.id} surface={surface} onAction={sendCanvasAction} />
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Back link */}
       <div style={{ marginTop: "24px", textAlign: "center" }}>
