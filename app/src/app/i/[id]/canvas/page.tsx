@@ -737,7 +737,9 @@ export default function CanvasPage() {
   }, [id, tokenFromUrl, processEvent]);
 
   // Keep connectRef in sync so reconnect always uses latest
-  connectRef.current = connect;
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
 
   const sendCanvasAction = useCallback((actionName: string, _surfaceId: string) => {
     const ws = wsRef.current;

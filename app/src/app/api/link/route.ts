@@ -11,7 +11,6 @@ import {
 } from "@/lib/db";
 import {
   findInstanceByAnyLinkedUserId,
-  instances,
 } from "@/lib/instances";
 import { startInstanceListener } from "@/lib/instance-listener";
 import { sendPlivoMessage } from "@/lib/whatsapp";
