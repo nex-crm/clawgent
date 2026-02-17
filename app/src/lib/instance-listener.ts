@@ -132,7 +132,10 @@ async function connectListener(state: ListenerState, attempt: number): Promise<v
       const chatState = p.state as string;
 
       // Ignore events from user-initiated (outbound) runs
-      if (runId && outboundRuns.has(runId)) return;
+      if (runId && outboundRuns.has(runId)) {
+        state.lastSeenTs = Date.now();
+        return;
+      }
 
       if (chatState === "final") {
         try {

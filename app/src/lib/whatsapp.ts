@@ -938,7 +938,9 @@ async function handleActive(session: WhatsAppSession, text: string): Promise<str
     await sendPlivoMessage(session.phone, reply);
   } finally {
     clearTimeout(thinkingTimer);
-    untrackOutboundRun(runId);
+    // Delay untracking for 3 minutes (> poll interval of 2 min)
+    // so the poller doesn't re-discover this message as "proactive"
+    setTimeout(() => untrackOutboundRun(runId), 3 * 60 * 1000);
   }
   return null;
 }
