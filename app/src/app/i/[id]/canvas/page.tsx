@@ -740,7 +740,7 @@ export default function CanvasPage() {
     connectRef.current = connect;
   }, [connect]);
 
-  const sendCanvasAction = useCallback((actionName: string) => {
+  const sendCanvasAction = useCallback((actionName: string, _surfaceId?: string) => {
     const ws = wsRef.current;
     const sessionKey = sessionKeyRef.current;
 
@@ -803,7 +803,7 @@ export default function CanvasPage() {
     transitionTimer.current = setTimeout(() => {
       setIsTransitioning(false);
     }, 30000);
-    sendCanvasAction(actionName, "");
+    sendCanvasAction(actionName);
   }, [sendCanvasAction]);
 
   useEffect(() => {
