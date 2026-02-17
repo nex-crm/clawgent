@@ -469,6 +469,7 @@ export default function CanvasPage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectRef = useRef<() => void>(() => {});
   const surfacesRef = useRef<Map<string, Surface>>(new Map());
   const sessionKeyRef = useRef<string | null>(null);
 
@@ -729,11 +730,14 @@ export default function CanvasPage() {
       // Auto-reconnect after 3 seconds (unless intentionally closed)
       if (e.code !== 1000) {
         reconnectTimer.current = setTimeout(() => {
-          connect();
+          connectRef.current();
         }, 3000);
       }
     };
   }, [id, tokenFromUrl, processEvent]);
+
+  // Keep connectRef in sync so reconnect always uses latest
+  connectRef.current = connect;
 
   const sendCanvasAction = useCallback((actionName: string, _surfaceId: string) => {
     const ws = wsRef.current;
