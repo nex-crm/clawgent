@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useAuthSafe } from "../../lib/use-auth-safe";
 import { getSignInUrlAction } from "../actions/auth";
 
@@ -104,9 +105,9 @@ export default function LinkPage() {
               GO TO DASHBOARD
             </a>
           )}
-          <a href="/" style={styles.linkSecondary}>
+          <Link href="/" style={styles.linkSecondary}>
             BACK TO HOME
-          </a>
+          </Link>
         </div>
       </div>
     );
