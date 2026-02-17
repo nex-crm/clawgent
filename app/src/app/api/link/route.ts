@@ -11,6 +11,7 @@ import {
 } from "@/lib/db";
 import {
   findInstanceByAnyLinkedUserId,
+  reconcileWithDocker,
 } from "@/lib/instances";
 import { startInstanceListener } from "@/lib/instance-listener";
 import { sendPlivoMessage } from "@/lib/whatsapp";
@@ -67,6 +68,9 @@ export async function POST(request: NextRequest) {
         { status: 409 },
       );
     }
+
+    // Reconcile in-memory state with Docker (may be stale after restart)
+    await reconcileWithDocker();
 
     // Find the web user's running instance
     const instance = findInstanceByAnyLinkedUserId(userId);

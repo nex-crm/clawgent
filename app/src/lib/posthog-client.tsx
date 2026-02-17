@@ -16,7 +16,7 @@ export function PostHogProvider({ children }: { children: React.ReactNode }) {
       capture_exceptions: true,
       debug: process.env.NODE_ENV === "development",
       // Already initialized — skip re-init
-      loaded: (ph) => {
+      loaded: () => {
         if (process.env.NODE_ENV === "development") {
           console.log("[PostHog] initialized");
         }

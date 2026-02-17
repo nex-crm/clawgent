@@ -225,7 +225,7 @@ export async function POST(request: NextRequest) {
             JSON.stringify(interactive),
           );
         }
-      } catch (e) {
+      } catch {
         console.warn(
           `[whatsapp webhook] Failed to parse Interactive field:`,
           data.Interactive,

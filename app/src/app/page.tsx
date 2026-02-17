@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, memo } from "react";
+import Image from "next/image";
 import posthog from "posthog-js";
 import { PERSONA_CONFIGS } from "../lib/personas";
 import { useAuthSafe } from "../lib/use-auth-safe";
@@ -253,20 +254,23 @@ function PersonaIcon({ persona, size = "cell" }: { persona: Persona; size?: "cel
   if (persona.sprite) {
     if (size === "cell") {
       return (
-        <img
+        <Image
           src={persona.sprite}
           alt={persona.name}
+          width={80}
+          height={80}
           className="sf2-cell-sprite"
-          loading="eager"
-          fetchPriority="high"
+          priority
           draggable={false}
         />
       );
     }
     return (
-      <img
+      <Image
         src={persona.sprite}
         alt={persona.name}
+        width={96}
+        height={96}
         className="w-20 h-20 sm:w-24 sm:h-24 object-contain"
         style={{ filter: `drop-shadow(0 0 6px ${colorToCssVar(persona.color)})` }}
         draggable={false}
@@ -499,9 +503,11 @@ function TemplateDetailModal({ persona, onClose }: TemplateDetailModalProps) {
         <div className="template-modal-header">
           <div className="flex items-center gap-3">
             {persona.sprite ? (
-              <img
+              <Image
                 src={persona.sprite}
                 alt={persona.name}
+                width={48}
+                height={48}
                 className="w-12 h-12 object-contain"
                 style={{ filter: `drop-shadow(0 0 4px ${accentVar})` }}
                 draggable={false}
@@ -572,6 +578,17 @@ function TemplateDetailModal({ persona, onClose }: TemplateDetailModalProps) {
     </div>
   );
 }
+
+// ─── Constants ──────────────────────────────────────────────────────
+
+const SNARKY_LINES = [
+  "Your competitors say thanks.",
+  "Brave. Wrong, but brave.",
+  "Cool. Your competitors just deployed three.",
+  "You'll be back. They always come back.",
+  "That's the spirit. Of 2019.",
+  "*The agents will remember this.*",
+];
 
 // ─── Main Component ─────────────────────────────────────────────────
 
@@ -1229,15 +1246,6 @@ export default function Home() {
 
   // ─── Start Menu Actions ─────────────────────────────────────────
 
-  const SNARKY_LINES = [
-    "Your competitors say thanks.",
-    "Brave. Wrong, but brave.",
-    "Cool. Your competitors just deployed three.",
-    "You'll be back. They always come back.",
-    "That's the spirit. Of 2019.",
-    "*The agents will remember this.*",
-  ];
-
   const handleDeployOption = useCallback(() => {
     ArcadeSounds.select();
     ArcadeSounds.screenTransition();
@@ -1577,10 +1585,13 @@ export default function Home() {
           <div className="max-w-4xl mx-auto flex items-center justify-between">
             <div className="flex items-center gap-3">
               {authUser.profilePictureUrl && (
-                <img
+                <Image
                   src={authUser.profilePictureUrl}
                   alt=""
+                  width={24}
+                  height={24}
                   className="w-6 h-6 rounded-full border border-white/20"
+                  unoptimized
                 />
               )}
               {authUser.email && (
@@ -1961,9 +1972,11 @@ export default function Home() {
                           >
                             <div className="flex items-start gap-3 p-3">
                               {agentPersona?.sprite ? (
-                                <img
+                                <Image
                                   src={agentPersona.sprite}
                                   alt={agent.name}
+                                  width={40}
+                                  height={40}
                                   className="w-10 h-10 object-cover rounded shrink-0"
                                 />
                               ) : (
@@ -2524,9 +2537,11 @@ export default function Home() {
             {selectedPersona ? (
               <div className="flex flex-col items-center gap-2">
                 {selectedPersona.sprite ? (
-                  <img
+                  <Image
                     src={selectedPersona.sprite}
                     alt={selectedPersona.name}
+                    width={64}
+                    height={64}
                     className="w-16 h-16 object-contain"
                     style={{ filter: `drop-shadow(0 0 6px ${colorToCssVar(selectedPersona.color)})` }}
                     draggable={false}
@@ -2928,12 +2943,15 @@ export default function Home() {
             {!showLaunchFlash && !showOnline && !showReady && deploying && (
               <div className="flex flex-col items-center gap-4 py-4">
                 {selectedPersona?.sprite ? (
-                  <img
+                  <Image
                     src={selectedPersona.sprite}
                     alt={selectedPersona.name}
+                    width={80}
+                    height={80}
                     className="w-16 h-16 sm:w-20 sm:h-20 object-contain"
                     style={{ filter: `drop-shadow(0 0 8px ${colorToCssVar(selectedPersona.color)})` }}
                     draggable={false}
+                    unoptimized
                   />
                 ) : (
                   <span className="text-5xl sm:text-6xl">

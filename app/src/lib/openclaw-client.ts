@@ -143,7 +143,7 @@ export class OpenClawClient {
         }
       });
 
-      ws.addEventListener("error", (err) => {
+      ws.addEventListener("error", () => {
         if (!this._connected) reject(new Error("WebSocket connection failed"));
       });
 

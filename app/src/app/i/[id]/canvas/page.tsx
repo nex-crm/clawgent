@@ -571,7 +571,6 @@ export default function CanvasPage() {
       } catch { /* ignore */ }
     }
     const wsUrl = `${proto}//${host}/i/${id}/${token ? `?token=${token}` : ""}`;
-    setStatus("connecting");
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -741,7 +740,7 @@ export default function CanvasPage() {
     connectRef.current = connect;
   }, [connect]);
 
-  const sendCanvasAction = useCallback((actionName: string, _surfaceId: string) => {
+  const sendCanvasAction = useCallback((actionName: string) => {
     const ws = wsRef.current;
     const sessionKey = sessionKeyRef.current;
 

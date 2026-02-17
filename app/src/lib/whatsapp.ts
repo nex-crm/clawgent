@@ -1568,7 +1568,6 @@ async function handleStatus(phone: string): Promise<void> {
   if (session.instanceId) {
     const inst = instances.get(session.instanceId);
     if (inst) {
-      const persona = session.selectedPersona ? PERSONA_CONFIGS[session.selectedPersona] : null;
       const provider = session.selectedProvider ? PROVIDER_CONFIG[session.selectedProvider] : null;
       const statusEmoji = inst.status === "running" ? "🟢" : inst.status === "starting" ? "🟡" : "🔴";
       const activeDisplay = getAgentDisplay(inst, session.activeAgent);
