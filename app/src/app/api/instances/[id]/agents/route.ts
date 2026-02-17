@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
-import { instances, runCommand, runCommandSilent, reconcileWithDocker } from "@/lib/instances";
+import { instances, runCommand, runCommandSilent, reconcileWithDocker, isInstanceOwner } from "@/lib/instances";
 import { PERSONA_CONFIGS } from "@/lib/personas";
 import { configureAgentPersona } from "@/lib/agent-config";
 import { getPostHogClient } from "@/lib/posthog-server";
@@ -52,7 +52,7 @@ export async function GET(
   if (!instance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 });
   }
-  if (instance.userId !== userId) {
+  if (!isInstanceOwner(instance, userId)) {
     return NextResponse.json(
       { error: "You can only view agents on your own instance" },
       { status: 403 },
@@ -156,7 +156,7 @@ export async function POST(
   if (!instance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 });
   }
-  if (instance.userId !== userId) {
+  if (!isInstanceOwner(instance, userId)) {
     return NextResponse.json(
       { error: "You can only add agents to your own instance" },
       { status: 403 },

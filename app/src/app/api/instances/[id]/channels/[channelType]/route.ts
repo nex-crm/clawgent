@@ -3,7 +3,7 @@ import { writeFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
-import { instances, runCommand, runCommandSilent, reconcileWithDocker } from "@/lib/instances";
+import { instances, runCommand, runCommandSilent, reconcileWithDocker, isInstanceOwner } from "@/lib/instances";
 import { type ChannelType, CHANNEL_TYPES } from "@/lib/channels";
 import { getPostHogClient } from "@/lib/posthog-server";
 
@@ -44,7 +44,7 @@ export async function DELETE(
   if (!instance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 });
   }
-  if (instance.userId && instance.userId !== userId) {
+  if (instance.userId && !isInstanceOwner(instance, userId)) {
     return NextResponse.json(
       { error: "You can only configure channels on your own instance" },
       { status: 403 },

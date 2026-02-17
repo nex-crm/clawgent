@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
-import { instances, runCommand, reconcileWithDocker } from "@/lib/instances";
+import { instances, runCommand, reconcileWithDocker, isInstanceOwner } from "@/lib/instances";
 
 /**
  * DELETE /api/instances/[id]/agents/[agentId]
@@ -31,7 +31,7 @@ export async function DELETE(
   if (!instance) {
     return NextResponse.json({ error: "Instance not found" }, { status: 404 });
   }
-  if (instance.userId && instance.userId !== userId) {
+  if (instance.userId && !isInstanceOwner(instance, userId)) {
     return NextResponse.json(
       { error: "You can only remove agents from your own instance" },
       { status: 403 },

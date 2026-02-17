@@ -3,7 +3,7 @@ import { writeFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
-import { instances, destroyInstance, reconcileWithDocker, runCommand, runCommandSilent, startPairingAutoApprover } from "@/lib/instances";
+import { instances, destroyInstance, reconcileWithDocker, runCommand, runCommandSilent, startPairingAutoApprover, isInstanceOwner } from "@/lib/instances";
 import { getPostHogClient } from "@/lib/posthog-server";
 import { dbGetLinkedByWebUser, dbGetWaSession, dbUpsertWaSession, dbDeleteLinkedByPhone } from "@/lib/db";
 import { sendPlivoMessage } from "@/lib/whatsapp";
@@ -39,7 +39,7 @@ export async function GET(
   }
 
   // Only allow the owner to view their instance details
-  if (instance.userId !== userId) {
+  if (!isInstanceOwner(instance, userId)) {
     return NextResponse.json(
       { error: "You can only view your own instances" },
       { status: 403 },
@@ -80,7 +80,7 @@ export async function DELETE(
   }
 
   // Only allow the owner to destroy their instance
-  if (instance.userId !== userId) {
+  if (!isInstanceOwner(instance, userId)) {
     return NextResponse.json(
       { error: "You can only destroy your own instances" },
       { status: 403 },
@@ -177,7 +177,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Instance not found" }, { status: 404 });
   }
 
-  if (instance.userId !== userId) {
+  if (!isInstanceOwner(instance, userId)) {
     return NextResponse.json(
       { error: "You can only modify your own instances" },
       { status: 403 },

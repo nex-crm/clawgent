@@ -382,6 +382,24 @@ export function findInstanceByAnyLinkedUserId(userId: string): Instance | undefi
   return undefined;
 }
 
+/**
+ * Check if a userId owns an instance — directly or via linked account.
+ * Used by API routes for ownership checks on linked WA↔web instances.
+ */
+export function isInstanceOwner(instance: Instance, userId: string): boolean {
+  if (instance.userId === userId) return true;
+
+  // Check linked accounts: web user accessing a WA-deployed instance (or vice versa)
+  if (userId.startsWith("wa-")) {
+    const phone = userId.replace("wa-", "");
+    const linked = dbGetLinkedByPhone(phone);
+    return !!linked && instance.userId === linked.web_user_id;
+  } else {
+    const linked = dbGetLinkedByWebUser(userId);
+    return !!linked && instance.userId === `wa-${linked.wa_phone}`;
+  }
+}
+
 /** Find an active instance by its gateway token. Used by LLM proxy to validate requests. */
 export function findInstanceByToken(token: string): Instance | undefined {
   // Check cache first, only return running/starting instances
