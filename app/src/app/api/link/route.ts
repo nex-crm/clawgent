@@ -10,7 +10,7 @@ import {
   dbUpsertWaSession,
 } from "@/lib/db";
 import {
-  findInstanceByAnyLinkedUserId,
+  findInstanceByUserId,
   reconcileWithDocker,
 } from "@/lib/instances";
 import { startInstanceListener } from "@/lib/instance-listener";
@@ -72,11 +72,13 @@ export async function POST(request: NextRequest) {
     // Reconcile in-memory state with Docker (may be stale after restart)
     await reconcileWithDocker();
 
-    // Find the web user's running instance
-    const instance = findInstanceByAnyLinkedUserId(userId);
+    // Find a running instance from either side: WA phone's instance OR web user's instance
+    const waInstance = findInstanceByUserId(`wa-${phone}`);
+    const webInstance = findInstanceByUserId(userId);
+    const instance = waInstance ?? webInstance;
     if (!instance || (instance.status !== "running" && instance.status !== "starting")) {
       return NextResponse.json(
-        { error: "You don't have a running instance. Deploy one first at " + BASE_URL },
+        { error: "No running instance found. Deploy one first — either from WhatsApp or at " + BASE_URL },
         { status: 400 },
       );
     }
