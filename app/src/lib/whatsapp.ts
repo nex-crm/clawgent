@@ -6,6 +6,7 @@ import {
   dbGetLinkedByPhone,
   dbDeleteLinkedByPhone,
   dbUpdateInstanceUserId,
+  dbInsertLinkCode,
   type WhatsAppSession,
 } from "./db";
 import {
@@ -111,6 +112,7 @@ const HELP_MESSAGE =
   `*/add* — add a new agent\n` +
   `*/switch* _name_ — switch active agent\n` +
   `*/key* — change AI provider or API key\n` +
+  `*/link* — connect to a web-deployed instance\n` +
   `*/unlink* — disconnect from web account\n` +
   `*/reset* — nuke everything, start fresh\n\n` +
   `_anything without a / goes straight to your active agent._\n\n` +
@@ -306,6 +308,7 @@ function buildHelpInteractive(): PlivoInteractiveButton {
         "*/add* — add a new agent\n" +
         "*/switch* _name_ — switch active agent\n" +
         "*/key* — change AI provider or API key\n" +
+        "*/link* — connect to a web-deployed instance\n" +
         "*/unlink* — disconnect from web account\n" +
         "*/reset* — nuke everything, start fresh\n\n" +
         "_anything without a / goes straight to your active agent._\n\n" +
@@ -584,6 +587,12 @@ export async function handleIncomingMessage(phone: string, text: string): Promis
     const posthog = getPostHogClient();
     posthog?.capture({ distinctId: `wa-${phone}`, event: "wa_command_used", properties: { source: "whatsapp", command: "/status" } });
     await handleStatus(phone);
+    return null;
+  }
+  if (cmd === "/link") {
+    const posthog = getPostHogClient();
+    posthog?.capture({ distinctId: `wa-${phone}`, event: "wa_command_used", properties: { source: "whatsapp", command: "/link" } });
+    await handleLinkCommand(phone);
     return null;
   }
 
@@ -1461,6 +1470,46 @@ async function handleUnlinkCommand(session: WhatsAppSession): Promise<string> {
 
   const dashboardLink = session.instanceId ? `${BASE_URL}/i/${session.instanceId}/` : BASE_URL;
   return `🔓 unlinked from web account.\n\nyour instance is now WhatsApp-only again.\n\n🌐 re-link anytime: ${dashboardLink}`;
+}
+
+// --- /link command: generate code to link WA to a web instance ---
+
+const LINK_CODE_CHARSET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // 30 chars, no 0/O/1/I/L
+const LINK_CODE_LENGTH = 6;
+const LINK_CODE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+function generateLinkCode(): string {
+  const bytes = randomBytes(LINK_CODE_LENGTH);
+  let code = "";
+  for (let i = 0; i < LINK_CODE_LENGTH; i++) {
+    code += LINK_CODE_CHARSET[bytes[i] % LINK_CODE_CHARSET.length];
+  }
+  return code;
+}
+
+async function handleLinkCommand(phone: string): Promise<void> {
+  const linked = dbGetLinkedByPhone(phone);
+  if (linked) {
+    await sendPlivoMessage(
+      phone,
+      `your WhatsApp is already linked to a web account.\n\n` +
+        `use */unlink* first if you want to link to a different account.\n\n` +
+        `🌐 dashboard: ${BASE_URL}`,
+    );
+    return;
+  }
+
+  const code = generateLinkCode();
+  const expiresAt = new Date(Date.now() + LINK_CODE_TTL_MS).toISOString();
+  dbInsertLinkCode(code, phone, expiresAt);
+
+  await sendPlivoMessage(
+    phone,
+    `🔗 *link code:* \`\`\`${code}\`\`\`\n\n` +
+      `open ${BASE_URL}/link in your browser and enter this code.\n\n` +
+      `⏳ expires in 15 minutes.\n\n` +
+      `_this connects your WhatsApp to your web-deployed instance so you can chat with it from here._`,
+  );
 }
 
 async function handleReset(phone: string): Promise<string | null> {

@@ -31,6 +31,8 @@ export default async function middleware(req: NextRequest, event: NextFetchEvent
           "/",
           "/api/status",
           "/auth/callback",
+          // Link page — shows sign-in prompt client-side if unauthenticated
+          "/link",
           // OpenClaw proxy paths — must remain accessible after initial auth redirect
           "/i/:path*",
           // WhatsApp webhook — Plivo sends inbound messages here (no auth)

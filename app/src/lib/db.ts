@@ -72,8 +72,17 @@ if (!g.__clawgent_db) {
       UNIQUE (wa_phone)
     );
 
+    CREATE TABLE IF NOT EXISTS link_codes (
+      code       TEXT PRIMARY KEY,
+      phone      TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      used       INTEGER NOT NULL DEFAULT 0
+    );
+
     CREATE INDEX IF NOT EXISTS idx_whatsapp_sessions_userId ON whatsapp_sessions(userId);
     CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_phone ON whatsapp_messages(phone);
+    CREATE INDEX IF NOT EXISTS idx_link_codes_phone ON link_codes(phone);
   `);
 
   // Migration: add expiresAt column if it doesn't exist (for existing DBs)
@@ -168,6 +177,21 @@ const stmtSoftDeleteLinkedByPhone = db.prepare("UPDATE linked_accounts SET unlin
 const stmtHardDeleteLinkedByPhone = db.prepare("DELETE FROM linked_accounts WHERE wa_phone = ?");
 const stmtWasUnlinkedPair = db.prepare("SELECT 1 FROM linked_accounts WHERE web_user_id = ? AND wa_phone = ? AND unlinked_at IS NOT NULL LIMIT 1");
 const stmtUpdateInstanceUserId = db.prepare("UPDATE instances SET userId = ? WHERE id = ?");
+
+// --- Link codes prepared statements ---
+
+const stmtDeleteLinkCodesByPhone = db.prepare("DELETE FROM link_codes WHERE phone = ?");
+const stmtInsertLinkCode = db.prepare(`
+  INSERT INTO link_codes (code, phone, expires_at, created_at, used)
+  VALUES (@code, @phone, @expires_at, @created_at, 0)
+`);
+const stmtGetLinkCode = db.prepare(
+  "SELECT * FROM link_codes WHERE code = ? AND used = 0 AND expires_at > ?"
+);
+const stmtMarkLinkCodeUsed = db.prepare("UPDATE link_codes SET used = 1 WHERE code = ?");
+const stmtCleanupExpiredLinkCodes = db.prepare(
+  "DELETE FROM link_codes WHERE expires_at < ? OR used = 1"
+);
 
 function rowToInstance(row: Record<string, unknown>): Instance {
   return {
@@ -346,3 +370,48 @@ export function dbWasUnlinkedPair(webUserId: string, phone: string): boolean {
 export function dbUpdateInstanceUserId(instanceId: string, newUserId: string): void {
   stmtUpdateInstanceUserId.run(newUserId, instanceId);
 }
+
+// --- Link codes types & CRUD ---
+
+export interface LinkCode {
+  code: string;
+  phone: string;
+  expires_at: string;
+  created_at: string;
+  used: number;
+}
+
+/** Insert a link code, removing any previous codes for the same phone. */
+export function dbInsertLinkCode(code: string, phone: string, expiresAt: string): void {
+  stmtDeleteLinkCodesByPhone.run(phone);
+  stmtInsertLinkCode.run({
+    code,
+    phone,
+    expires_at: expiresAt,
+    created_at: new Date().toISOString(),
+  });
+}
+
+/** Get a valid (unexpired, unused) link code. */
+export function dbGetLinkCode(code: string): LinkCode | undefined {
+  return stmtGetLinkCode.get(code, new Date().toISOString()) as LinkCode | undefined;
+}
+
+/** Mark a link code as used. */
+export function dbMarkLinkCodeUsed(code: string): void {
+  stmtMarkLinkCodeUsed.run(code);
+}
+
+/** Delete expired and used link codes. */
+export function dbCleanupExpiredLinkCodes(): void {
+  stmtCleanupExpiredLinkCodes.run(new Date().toISOString());
+}
+
+// Cleanup expired link codes every 30 minutes
+setInterval(() => {
+  try {
+    dbCleanupExpiredLinkCodes();
+  } catch {
+    // Non-fatal
+  }
+}, 30 * 60 * 1000);
