@@ -28,6 +28,7 @@ interface Persona {
   skills: SkillSummary[];
   recommendedModel: "anthropic" | "google" | "openai";
   sprite: string | null;
+  replaces: string[];
 }
 
 /** Build SkillSummary[] from PERSONA_CONFIGS for a given persona id */
@@ -45,104 +46,81 @@ function buildSkillSummaries(personaId: string): SkillSummary[] {
 
 const PERSONAS: Persona[] = [
   {
-    id: "marketing-pro",
-    name: "MARKETING PRO",
-    tagline: "Finally, a marketer that doesn't need 47 meetings first",
-    icon: "\uD83D\uDCE2",
-    color: "arcade-pink",
-    skills: buildSkillSummaries("marketing-pro"),
-    recommendedModel: "anthropic",
-    sprite: "/sprites/character-1.png",
-  },
-  {
-    id: "sales-assistant",
-    name: "SALES ASSISTANT",
-    tagline: "Does the research so you can skip the \"just checking in\" era",
-    icon: "\uD83C\uDFAF",
-    color: "arcade-yellow",
-    skills: buildSkillSummaries("sales-assistant"),
-    recommendedModel: "anthropic",
-    sprite: "/sprites/character-2.png",
-  },
-  {
-    id: "lead-gen",
-    name: "LEAD GEN MACHINE",
-    tagline: "Turns the internet into a pipeline. Legally.",
-    icon: "\uD83E\uDDF2",
-    color: "arcade-orange",
-    skills: buildSkillSummaries("lead-gen"),
-    recommendedModel: "google",
-    sprite: "/sprites/character-3.png",
-  },
-  {
-    id: "dev-copilot",
-    name: "DEV COPILOT",
-    tagline: "Reviews your PRs without the passive-aggressive comments",
-    icon: "\u2328\uFE0F",
-    color: "arcade-green",
-    skills: buildSkillSummaries("dev-copilot"),
-    recommendedModel: "anthropic",
-    sprite: "/sprites/character-4.png",
-  },
-  {
-    id: "support-agent",
-    name: "SUPPORT AGENT",
-    tagline: "Closes tickets faster than users can open them",
-    icon: "\uD83D\uDEE1\uFE0F",
-    color: "arcade-blue",
-    skills: buildSkillSummaries("support-agent"),
-    recommendedModel: "anthropic",
-    sprite: "/sprites/character-5.png",
-  },
-  {
-    id: "ops-automator",
-    name: "OPS AUTOMATOR",
-    tagline: "Automates the stuff you keep saying you'll automate next quarter",
-    icon: "\u2699\uFE0F",
-    color: "arcade-purple",
-    skills: buildSkillSummaries("ops-automator"),
-    recommendedModel: "google",
-    sprite: "/sprites/character-6.png",
-  },
-  {
-    id: "founder-sidekick",
-    name: "FOUNDER SIDEKICK",
-    tagline: "A co-founder who actually ships and doesn't want equity",
-    icon: "\uD83D\uDE80",
-    color: "arcade-orange",
-    skills: buildSkillSummaries("founder-sidekick"),
-    recommendedModel: "anthropic",
-    sprite: "/sprites/character-7.png",
-  },
-  {
-    id: "data-analyst",
-    name: "DATA ANALYST",
-    tagline: "Makes your CSVs confess things they didn't know they knew",
-    icon: "\uD83D\uDCCA",
-    color: "arcade-blue",
-    skills: buildSkillSummaries("data-analyst"),
-    recommendedModel: "google",
-    sprite: "/sprites/character-8.png",
-  },
-  {
-    id: "gtm-engineer",
-    name: "GTM ENGINEER",
-    tagline: "Your CRM is a mess. This agent doesn't judge, it fixes.",
-    icon: "\u26A1",
-    color: "arcade-red",
-    skills: buildSkillSummaries("gtm-engineer"),
-    recommendedModel: "anthropic",
-    sprite: "/sprites/character-9.png",
-  },
-  {
     id: "crm-agent",
-    name: "CRM AGENT",
+    name: "CRM",
     tagline: "Your CRM that talks back and never lets anything slip",
     icon: "\uD83E\uDD1D",
     color: "arcade-yellow",
     skills: buildSkillSummaries("crm-agent"),
     recommendedModel: "anthropic",
-    sprite: null,
+    sprite: "/sprites/character-4.png",
+    replaces: ["HubSpot CRM", "Salesforce", "Pipedrive"],
+  },
+  {
+    id: "enrichment-engine",
+    name: "ENRICHMENT ENGINE",
+    tagline: "Turns raw leads into qualified prospects with data-driven precision",
+    icon: "\uD83D\uDD0D",
+    color: "arcade-orange",
+    skills: buildSkillSummaries("enrichment-engine"),
+    recommendedModel: "anthropic",
+    sprite: "/sprites/character-3.png",
+    replaces: ["Clay", "Clearbit", "ZoomInfo"],
+  },
+  {
+    id: "sales-engagement",
+    name: "SALES ENGAGEMENT",
+    tagline: "Runs your outreach sequences so you can focus on closing",
+    icon: "\uD83C\uDFAF",
+    color: "arcade-pink",
+    skills: buildSkillSummaries("sales-engagement"),
+    recommendedModel: "anthropic",
+    sprite: "/sprites/character-2.png",
+    replaces: ["Apollo", "Salesloft", "Outreach"],
+  },
+  {
+    id: "marketing-automation",
+    name: "MARKETING AUTOMATION",
+    tagline: "Plans campaigns, manages segments, and tracks what actually works",
+    icon: "\uD83D\uDCE2",
+    color: "arcade-purple",
+    skills: buildSkillSummaries("marketing-automation"),
+    recommendedModel: "anthropic",
+    sprite: "/sprites/character-1.png",
+    replaces: ["ActiveCampaign", "Mailchimp", "HubSpot Marketing"],
+  },
+  {
+    id: "help-desk",
+    name: "HELP DESK",
+    tagline: "Manages tickets, tracks SLAs, and keeps customers happy",
+    icon: "\uD83D\uDEE1\uFE0F",
+    color: "arcade-blue",
+    skills: buildSkillSummaries("help-desk"),
+    recommendedModel: "anthropic",
+    sprite: "/sprites/character-5.png",
+    replaces: ["Zendesk", "Intercom", "Freshdesk"],
+  },
+  {
+    id: "customer-success",
+    name: "CUSTOMER SUCCESS",
+    tagline: "Monitors account health and catches churn before it happens",
+    icon: "\uD83D\uDC9A",
+    color: "arcade-green",
+    skills: buildSkillSummaries("customer-success"),
+    recommendedModel: "anthropic",
+    sprite: "/sprites/character-6.png",
+    replaces: ["Gainsight", "Totango", "ChurnZero"],
+  },
+  {
+    id: "revenue-intelligence",
+    name: "REVENUE INTELLIGENCE",
+    tagline: "Pipeline analytics, forecasting, and deal coaching from your data",
+    icon: "\uD83D\uDCCA",
+    color: "arcade-red",
+    skills: buildSkillSummaries("revenue-intelligence"),
+    recommendedModel: "anthropic",
+    sprite: "/sprites/character-8.png",
+    replaces: ["Clari", "InsightSquared", "Gong Analytics"],
   },
 ];
 
@@ -398,6 +376,13 @@ const PersonaPreviewPanel = memo(function PersonaPreviewPanel({
         {/* Tagline */}
         <p className="sf2-preview-tagline">{displayPersona.tagline}</p>
 
+        {/* Replaces badge */}
+        {displayPersona.replaces.length > 0 && (
+          <p className="text-xs text-white/40 mt-1">
+            Replaces: {displayPersona.replaces.join(" \u00B7 ")}
+          </p>
+        )}
+
         {/* Stats */}
         <div className="space-y-1.5">
           <div className="sf2-preview-stat">
@@ -414,8 +399,8 @@ const PersonaPreviewPanel = memo(function PersonaPreviewPanel({
           </div>
         </div>
 
-        {/* Skill tags — max 4 shown */}
-        {displayPersona.skills.length > 0 && (
+        {/* Skill tags — max 4 shown, or Coming Soon badge */}
+        {displayPersona.skills.length > 0 ? (
           <div className="flex flex-wrap gap-1.5 pt-1">
             {displayPersona.skills.slice(0, 4).map((skill) => (
               <span
@@ -431,6 +416,12 @@ const PersonaPreviewPanel = memo(function PersonaPreviewPanel({
                 +{displayPersona.skills.length - 4} MORE
               </span>
             )}
+          </div>
+        ) : (
+          <div className="pt-1">
+            <span className="pixel-font text-[9px] px-2.5 py-1 border border-yellow-500/30 bg-yellow-500/10 text-yellow-400/80">
+              COMING SOON
+            </span>
           </div>
         )}
 
@@ -522,6 +513,11 @@ function TemplateDetailModal({ persona, onClose }: TemplateDetailModalProps) {
               <p className="pixel-font text-[8px] sm:text-[9px] text-white/40 mt-1 leading-relaxed">
                 {persona.tagline}
               </p>
+              {persona.replaces.length > 0 && (
+                <p className="pixel-font text-[7px] sm:text-[8px] text-white/25 mt-0.5">
+                  Replaces: {persona.replaces.join(" \u00B7 ")}
+                </p>
+              )}
             </div>
           </div>
           <button
@@ -537,7 +533,9 @@ function TemplateDetailModal({ persona, onClose }: TemplateDetailModalProps) {
         {/* Skill count */}
         <div className="px-5 py-2">
           <p className="pixel-font text-[8px] sm:text-[9px] text-white/25 tracking-wider">
-            {persona.skills.length} SKILL{persona.skills.length !== 1 ? "S" : ""} PRE-LOADED
+            {persona.skills.length > 0
+              ? `${persona.skills.length} SKILL${persona.skills.length !== 1 ? "S" : ""} PRE-LOADED`
+              : "COMING SOON — SKILLS IN DEVELOPMENT"}
           </p>
         </div>
 
@@ -1321,7 +1319,7 @@ export default function Home() {
 
     function handleKeyDown(e: KeyboardEvent) {
       const cols = 3;
-      const total = PERSONAS.length; // 9
+      const total = PERSONAS.length; // 7
       let newIndex = gridIndex;
 
       switch (e.key) {
@@ -1438,7 +1436,7 @@ export default function Home() {
         <div className="sf2-select-layout">
           {/* 3x3 CHARACTER GRID */}
           <div className="sf2-grid-frame">
-            <div className="grid grid-cols-3">
+            <div className="grid grid-cols-3 [&>*:last-child:nth-child(3n+1)]:col-start-2">
               {PERSONAS.map((persona, index) => {
                 const isHovered = hovered?.id === persona.id;
                 const isKbFocused = showKeyboardNav && activeGridIndex === index;
