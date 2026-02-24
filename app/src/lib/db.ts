@@ -49,6 +49,7 @@ if (!g.__clawgent_db) {
       currentState    TEXT NOT NULL DEFAULT 'WELCOME',
       selectedPersona TEXT,
       selectedProvider TEXT,
+      activeAgent     TEXT,
       instanceId      TEXT,
       createdAt       TEXT NOT NULL,
       updatedAt       TEXT NOT NULL
@@ -93,12 +94,17 @@ if (!g.__clawgent_db) {
     g.__clawgent_db.exec("ALTER TABLE instances ADD COLUMN expiresAt TEXT");
   }
 
-  // Migration: add activeAgent column to whatsapp_sessions
-  const waCols = g.__clawgent_db
-    .prepare("PRAGMA table_info(whatsapp_sessions)")
-    .all() as { name: string }[];
-  if (!waCols.some((c) => c.name === "activeAgent")) {
-    g.__clawgent_db.exec("ALTER TABLE whatsapp_sessions ADD COLUMN activeAgent TEXT");
+  // Migration: add activeAgent column to whatsapp_sessions (for pre-existing DBs).
+  // Wrapped in try/catch — build-time workers can race past the PRAGMA check.
+  try {
+    const waCols = g.__clawgent_db
+      .prepare("PRAGMA table_info(whatsapp_sessions)")
+      .all() as { name: string }[];
+    if (!waCols.some((c) => c.name === "activeAgent")) {
+      g.__clawgent_db.exec("ALTER TABLE whatsapp_sessions ADD COLUMN activeAgent TEXT");
+    }
+  } catch {
+    // Column already added by a concurrent worker — safe to ignore.
   }
 
   // Migration: add unlinked_at column to linked_accounts
