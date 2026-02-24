@@ -456,6 +456,73 @@ function SurfaceView({ surface, onAction }: { surface: Surface; onAction?: (acti
 
 type ConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
 
+// ─── Agent Nav Configs ──────────────────────────────────────────────
+// Keyed by surfaceId prefix — auto-detected from first received surface
+
+type NavItem = { id: string; label: string; icon: string; actionName: string };
+
+const AGENT_NAV_CONFIGS: Record<string, NavItem[]> = {
+  // CRM Agent — surfaceIds: digest, pipeline, followups, insights
+  "crm": [
+    { id: "digest", label: "HOME", icon: "\u{1F3E0}", actionName: "view-digest" },
+    { id: "pipeline", label: "PIPELINE", icon: "\u{1F4CA}", actionName: "view-pipeline" },
+    { id: "followups", label: "FOLLOW-UPS", icon: "\u{23F0}", actionName: "view-followups" },
+    { id: "insights", label: "INSIGHTS", icon: "\u{1F4A1}", actionName: "view-insights" },
+  ],
+  // Enrichment Engine — surfaceIds: enrich-*
+  "enrich": [
+    { id: "enrich-dashboard", label: "HOME", icon: "\u{1F50D}", actionName: "view-dashboard" },
+    { id: "enrich-leads", label: "LEADS", icon: "\u{1F465}", actionName: "browse-leads" },
+    { id: "enrich-queue", label: "QUEUE", icon: "\u{1F4E5}", actionName: "view-queue" },
+    { id: "enrich-board", label: "PIPELINE", icon: "\u{1F4CA}", actionName: "view-board" },
+  ],
+  // Sales Engagement — surfaceIds: engage-*
+  "engage": [
+    { id: "engage-dashboard", label: "HOME", icon: "\u{1F3AF}", actionName: "view-dashboard" },
+    { id: "engage-prospects", label: "PROSPECTS", icon: "\u{1F465}", actionName: "view-prospects" },
+    { id: "engage-tasks", label: "TASKS", icon: "\u{1F4C5}", actionName: "view-tasks" },
+    { id: "engage-performance", label: "STATS", icon: "\u{1F4CA}", actionName: "view-performance" },
+  ],
+  // Help Desk — surfaceIds: helpdesk-*
+  "helpdesk": [
+    { id: "helpdesk-dashboard", label: "HOME", icon: "\u{1F6E1}", actionName: "view-dashboard" },
+    { id: "helpdesk-tickets", label: "TICKETS", icon: "\u{1F3AB}", actionName: "view-tickets" },
+    { id: "helpdesk-sla", label: "SLAs", icon: "\u{23F0}", actionName: "view-sla" },
+    { id: "helpdesk-kb", label: "KB", icon: "\u{1F4DA}", actionName: "view-kb" },
+  ],
+  // Customer Success — surfaceIds: success-*
+  "success": [
+    { id: "success-dashboard", label: "HOME", icon: "\u{1F49A}", actionName: "view-dashboard" },
+    { id: "success-accounts", label: "ACCOUNTS", icon: "\u{1F465}", actionName: "view-accounts" },
+    { id: "success-risk", label: "RISK", icon: "\u{26A0}", actionName: "view-risk" },
+    { id: "success-renewals", label: "RENEWALS", icon: "\u{1F4C5}", actionName: "view-renewals" },
+  ],
+  // Revenue Intelligence — surfaceIds: intel-*
+  "intel": [
+    { id: "intel-dashboard", label: "HOME", icon: "\u{1F4CA}", actionName: "view-dashboard" },
+    { id: "intel-forecast", label: "FORECAST", icon: "\u{1F4C8}", actionName: "view-forecast" },
+    { id: "intel-cohorts", label: "COHORTS", icon: "\u{1F465}", actionName: "view-cohorts" },
+    { id: "intel-deals", label: "DEALS", icon: "\u{1F3AF}", actionName: "view-deals" },
+  ],
+  // Marketing Automation — surfaceIds: campaign-*
+  "campaign": [
+    { id: "campaign-dashboard", label: "HOME", icon: "\u{1F4E2}", actionName: "view-dashboard" },
+    { id: "campaign-board", label: "CAMPAIGNS", icon: "\u{1F4CB}", actionName: "view-campaigns" },
+    { id: "campaign-segments", label: "SEGMENTS", icon: "\u{1F465}", actionName: "view-segments" },
+    { id: "campaign-performance", label: "STATS", icon: "\u{1F4CA}", actionName: "view-performance" },
+  ],
+};
+
+// CRM uses unprefixed surfaceIds — detect by checking known CRM IDs
+const CRM_SURFACE_IDS = new Set(["digest", "pipeline", "followups", "insights"]);
+
+function detectAgentPrefix(surfaceId: string): string | null {
+  if (CRM_SURFACE_IDS.has(surfaceId)) return "crm";
+  const prefix = surfaceId.split("-")[0];
+  if (prefix in AGENT_NAV_CONFIGS) return prefix;
+  return null;
+}
+
 // ─── Main Canvas Page ───────────────────────────────────────────────
 
 export default function CanvasPage() {
@@ -471,16 +538,20 @@ export default function CanvasPage() {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectRef = useRef<() => void>(() => {});
   const surfacesRef = useRef<Map<string, Surface>>(new Map());
+
+  // BroadcastChannel relay: send actions through the chat tab's WebSocket
+  // so they appear in the chat conversation
+  const bcRef = useRef<BroadcastChannel | null>(null);
+  const relayAvailableRef = useRef(false);
+  const pendingAckRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const sessionKeyRef = useRef<string | null>(null);
 
-  const NAV_ITEMS = [
-    { id: "digest", label: "HOME", icon: "\u{1F3E0}", actionName: "view-digest" },
-    { id: "pipeline", label: "PIPELINE", icon: "\u{1F4CA}", actionName: "view-pipeline" },
-    { id: "followups", label: "FOLLOW-UPS", icon: "\u{23F0}", actionName: "view-followups" },
-    { id: "insights", label: "INSIGHTS", icon: "\u{1F4A1}", actionName: "view-insights" },
-  ];
+  // Detect agent type from first received surfaceId
+  const [detectedAgent, setDetectedAgent] = useState<string>("crm");
+  const detectedAgentRef = useRef(detectedAgent);
+  const NAV_ITEMS = AGENT_NAV_CONFIGS[detectedAgent] || AGENT_NAV_CONFIGS["crm"];
 
-  const [currentView, setCurrentView] = useState("digest");
+  const [currentView, setCurrentView] = useState(NAV_ITEMS[0]?.id || "digest");
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [lastAction, setLastAction] = useState<string | null>(null);
   const transitionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -514,6 +585,13 @@ export default function CanvasPage() {
       current.set(surfaceId, surface);
       surfacesRef.current = new Map(current);
       setSurfaces(new Map(current));
+
+      // Auto-detect agent type from surfaceId prefix
+      const detected = detectAgentPrefix(surfaceId);
+      if (detected && detected !== detectedAgentRef.current) {
+        detectedAgentRef.current = detected;
+        setDetectedAgent(detected);
+      }
 
       // Update currentView to show the incoming surface
       setCurrentView(surfaceId);
@@ -740,37 +818,23 @@ export default function CanvasPage() {
     connectRef.current = connect;
   }, [connect]);
 
-  const sendCanvasAction = useCallback((actionName: string, _surfaceId?: string) => {
+  // Send action via own WebSocket (direct to gateway)
+  const sendViaOwnWs = useCallback((actionName: string) => {
     const ws = wsRef.current;
     const sessionKey = sessionKeyRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !sessionKey) return false;
 
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.warn("[Canvas] WS not open, state:", ws?.readyState, "— queueing retry");
-      // Retry once after 2s (WS may be reconnecting)
-      setTimeout(() => {
-        const ws2 = wsRef.current;
-        const sk2 = sessionKeyRef.current;
-        if (ws2 && ws2.readyState === WebSocket.OPEN && sk2) {
-          const retryId = `canvas-action-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-          ws2.send(JSON.stringify({
-            type: "req", id: retryId, method: "chat.send",
-            params: { sessionKey: sk2, message: `[Canvas] ${actionName}`, idempotencyKey: retryId },
-          }));
-          setLastAction(actionName);
-          setTimeout(() => setLastAction(null), 3000);
-        } else {
-          setErrorMsg("Not connected — reload the page");
-          setTimeout(() => setErrorMsg(null), 4000);
-        }
-      }, 2000);
-      return;
-    }
-    if (!sessionKey) {
-      setErrorMsg("No session key — open chat first, then reload canvas");
-      setTimeout(() => setErrorMsg(null), 5000);
-      return;
-    }
+    const actionId = `canvas-action-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    ws.send(JSON.stringify({
+      type: "req",
+      id: actionId,
+      method: "chat.send",
+      params: { sessionKey, message: `[Canvas] ${actionName}`, idempotencyKey: actionId },
+    }));
+    return true;
+  }, []);
 
+  const sendCanvasAction = useCallback((actionName: string, _surfaceId?: string) => {
     setLastAction(actionName);
     setTimeout(() => setLastAction(null), 3000);
 
@@ -782,19 +846,37 @@ export default function CanvasPage() {
       transitionTimer.current = setTimeout(() => setIsTransitioning(false), 30000);
     }
 
-    const actionId = `canvas-action-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const req = {
-      type: "req",
-      id: actionId,
-      method: "chat.send",
-      params: {
-        sessionKey,
-        message: `[Canvas] ${actionName}`,
-        idempotencyKey: actionId,
-      },
-    };
-    ws.send(JSON.stringify(req));
-  }, []);
+    const bc = bcRef.current;
+
+    // Try BroadcastChannel relay first (sends through chat tab's WS so it appears in chat)
+    if (bc && relayAvailableRef.current) {
+      const msgId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      bc.postMessage({ type: "canvas-action", action: actionName, id: msgId });
+
+      // Set a fallback timer: if no ack within 400ms, send via own WS
+      const timer = setTimeout(() => {
+        pendingAckRef.current.delete(msgId);
+        console.log("[Canvas] No relay ack, falling back to own WS");
+        if (!sendViaOwnWs(actionName)) {
+          setErrorMsg("Not connected — reload the page");
+          setTimeout(() => setErrorMsg(null), 4000);
+        }
+      }, 400);
+      pendingAckRef.current.set(msgId, timer);
+      return;
+    }
+
+    // Fallback: send via own WebSocket
+    if (!sendViaOwnWs(actionName)) {
+      // Retry once after 2s
+      setTimeout(() => {
+        if (!sendViaOwnWs(actionName)) {
+          setErrorMsg("Not connected — reload the page");
+          setTimeout(() => setErrorMsg(null), 4000);
+        }
+      }, 2000);
+    }
+  }, [sendViaOwnWs]);
 
   const handleNavClick = useCallback((viewId: string, actionName: string) => {
     setCurrentView(viewId);
@@ -805,6 +887,76 @@ export default function CanvasPage() {
     }, 30000);
     sendCanvasAction(actionName);
   }, [sendCanvasAction]);
+
+  // BroadcastChannel setup: relay actions through chat tab + receive A2UI events
+  useEffect(() => {
+    const bc = new BroadcastChannel(`clawgent-canvas-${id}`);
+    bcRef.current = bc;
+
+    bc.onmessage = (e: MessageEvent) => {
+      const d = e.data;
+      if (!d) return;
+
+      // Relay acknowledged our action — cancel fallback timer
+      if (d.type === "action-ack" && d.id) {
+        const timer = pendingAckRef.current.get(d.id);
+        if (timer) {
+          clearTimeout(timer);
+          pendingAckRef.current.delete(d.id);
+        }
+      }
+
+      // Relay is ready (chat tab connected)
+      if (d.type === "relay-ready" || (d.type === "pong" && d.ready)) {
+        relayAvailableRef.current = true;
+      }
+
+      // A2UI event forwarded from chat tab
+      if (d.type === "a2ui-event" && d.event) {
+        processEvent(d.event as A2UIEvent);
+      }
+
+      // Chat event that may contain A2UI in code fences
+      if (d.type === "chat-event" && d.frame) {
+        const frame = d.frame;
+        if (frame.type === "event" && frame.event === "chat" && frame.payload) {
+          const payload = frame.payload;
+          if (payload.state === "final" && payload.message) {
+            const content = payload.message.content;
+            let textContent = "";
+            if (typeof content === "string") {
+              textContent = content;
+            } else if (Array.isArray(content)) {
+              textContent = content
+                .filter((c: { type: string; text?: string }) => c.type === "text" && typeof c.text === "string")
+                .map((c: { text: string }) => c.text)
+                .join("\n");
+            }
+            if (textContent) {
+              const fenceEvents = extractA2UIFromCodeFence(textContent);
+              for (const event of fenceEvents) {
+                processEvent(event);
+              }
+            }
+          }
+        }
+      }
+    };
+
+    // Ping to check if chat tab relay is available
+    bc.postMessage({ type: "ping" });
+    // Re-ping periodically
+    const pingInterval = setInterval(() => {
+      bc.postMessage({ type: "ping" });
+    }, 5000);
+
+    return () => {
+      clearInterval(pingInterval);
+      bc.close();
+      bcRef.current = null;
+      relayAvailableRef.current = false;
+    };
+  }, [id, processEvent]);
 
   useEffect(() => {
     // Store token in localStorage for OpenClaw auth (consistent with proxy.ts)
@@ -1013,7 +1165,7 @@ export default function CanvasPage() {
                     lineHeight: 1.5,
                   }}
                 >
-                  Ask your agent for a daily digest to get started.
+                  Ask your agent to show the dashboard to get started.
                 </span>
               )}
             </div>
@@ -1057,13 +1209,7 @@ export default function CanvasPage() {
                   lineHeight: 1.5,
                 }}
               >
-                {currentView === "digest"
-                  ? "Ask your agent for a daily digest."
-                  : currentView === "pipeline"
-                    ? "Ask your agent to show the pipeline."
-                    : currentView === "followups"
-                      ? "Ask your agent to show follow-ups."
-                      : "Ask your agent to show insights."}
+                Ask your agent to show {activeNav?.label?.toLowerCase() || currentView}.
               </span>
               <button
                 onClick={() => handleNavClick(currentView, activeNav?.actionName || `view-${currentView}`)}

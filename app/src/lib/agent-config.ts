@@ -6,7 +6,7 @@
  * via the /api/instances/[id]/agents endpoint.
  */
 import { writeFileSync, mkdtempSync, mkdirSync, rmSync } from "fs";
-import { join } from "path";
+import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { runCommand, runCommandSilent, type Instance } from "./instances";
 import { PERSONA_CONFIGS, type SkillConfig } from "./personas";
@@ -45,6 +45,7 @@ export async function configureAgentPersona(
     // Build the full workspace tree locally
     writeFileSync(join(tmpDir, "SOUL.md"), config.soul);
     writeFileSync(join(tmpDir, "IDENTITY.md"), config.identity);
+    writeFileSync(join(tmpDir, "BOOTSTRAP.md"), config.bootstrap);
 
     // Skills
     if (config.skills.length > 0) {
@@ -53,23 +54,27 @@ export async function configureAgentPersona(
         const skillDir = join(tmpDir, "skills", skill.name);
         mkdirSync(skillDir, { recursive: true });
         writeFileSync(join(skillDir, "SKILL.md"), buildSkillMd(skill));
+
+        // Write bundled script files (e.g. scripts/nex-api.sh)
+        if (skill.files) {
+          for (const [relPath, content] of Object.entries(skill.files)) {
+            const filePath = join(skillDir, relPath);
+            mkdirSync(dirname(filePath), { recursive: true });
+            writeFileSync(filePath, content, { mode: 0o755 });
+          }
+        }
       }
     }
 
     // Heartbeat
     if (config.heartbeat) {
       writeFileSync(join(tmpDir, "HEARTBEAT.md"), config.heartbeat);
-      mkdirSync(join(tmpDir, "memory"), { recursive: true });
-      writeFileSync(join(tmpDir, "memory", "heartbeat-state.json"), JSON.stringify({
-        lastChecks: {},
-        notes: "Timestamps are unix epoch. null means never checked.",
-      }, null, 2));
     }
 
-    // Single docker call: ensure workspace exists + remove BOOTSTRAP.md
+    // Ensure workspace exists
     await runCommand("docker", [
       "exec", instance.containerName,
-      "sh", "-c", `mkdir -p ${wsPath} && rm -f ${wsPath}/BOOTSTRAP.md`,
+      "sh", "-c", `mkdir -p ${wsPath}/memory`,
     ]);
 
     // Single docker cp: push entire tree into the workspace
@@ -77,6 +82,38 @@ export async function configureAgentPersona(
     await runCommand("docker", [
       "cp", `${tmpDir}/.`, `${instance.containerName}:${wsPath}/`,
     ]);
+
+    // Write memory files only if they don't already exist (preserves agent state)
+    const memoryFiles: Record<string, string> = {
+      "memory/memory.md": config.memory,
+    };
+    if (config.heartbeat) {
+      memoryFiles["memory/heartbeat-state.json"] = JSON.stringify({
+        lastChecks: {},
+        notes: "Timestamps are unix epoch. null means never checked.",
+      }, null, 2);
+    }
+    for (const [relPath, content] of Object.entries(memoryFiles)) {
+      try {
+        await runCommandSilent("docker", [
+          "exec", instance.containerName,
+          "sh", "-c", `test -f ${wsPath}/${relPath}`,
+        ]);
+        // File exists — don't overwrite
+      } catch {
+        // File doesn't exist — write it
+        const memTmpDir = mkdtempSync(join(tmpdir(), "clawgent-mem-"));
+        try {
+          const filePath = join(memTmpDir, "file");
+          writeFileSync(filePath, content);
+          await runCommand("docker", [
+            "cp", filePath, `${instance.containerName}:${wsPath}/${relPath}`,
+          ]);
+        } finally {
+          rmSync(memTmpDir, { recursive: true, force: true });
+        }
+      }
+    }
 
     if (config.skills.length > 0) {
       log?.(`Skills loaded: ${config.skills.map(s => s.name).join(", ")}`);
@@ -139,17 +176,27 @@ export async function configureAgentPersona(
   }
 }
 
+/** Escape a value for YAML frontmatter (wrap in quotes if it contains special chars). */
+function escapeYamlValue(value: string): string {
+  // If value contains YAML-special characters, wrap in double quotes and escape internal quotes
+  if (/[:#{}[\],&*?|>!%@`"'\n\r]/.test(value)) {
+    return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+  }
+  return value;
+}
+
 export function buildSkillMd(skill: SkillConfig): string {
   const metadata: Record<string, unknown> = {
-    openclaw: {
+    clawdbot: {
       emoji: skill.emoji,
       ...(skill.requires ? { requires: skill.requires } : {}),
+      ...(skill.files ? { files: Object.keys(skill.files) } : {}),
     },
   };
 
   return `---
-name: ${skill.name}
-description: ${skill.description}
+name: ${escapeYamlValue(skill.name)}
+description: ${escapeYamlValue(skill.description)}
 metadata: ${JSON.stringify(metadata)}
 ---
 

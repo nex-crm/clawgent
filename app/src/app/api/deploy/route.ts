@@ -173,6 +173,7 @@ async function deployInstance(
     const dockerArgs = [
       "run", "-d",
       "--name", instance.containerName,
+      "--network", "clawgent-net",
       "--pids-limit", "256",
       "--memory", CONTAINER_MEMORY,
       "--memory-reservation", "768m",
@@ -428,7 +429,7 @@ async function injectGatewayConfig(instance: Instance, modelId?: string): Promis
 
   const controlUi = (gateway.controlUi || {}) as Record<string, unknown>;
   controlUi.allowedOrigins = ALLOWED_ORIGINS;
-  controlUi.allowInsecureAuth = true;
+  // allowInsecureAuth removed — all traffic is behind SSL via nginx
   gateway.controlUi = controlUi;
   config.gateway = gateway;
 
