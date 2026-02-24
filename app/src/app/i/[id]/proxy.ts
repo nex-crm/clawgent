@@ -48,6 +48,14 @@ export async function proxyRequest(
 
   // For root dashboard path without token: redirect to include ?token=
   // OpenClaw natively reads ?token= from URL and applies it to settings.
+  //
+  // SECURITY NOTE: Passing the token via URL query param is a trade-off.
+  // OpenClaw requires ?token= for initial auth — it reads from the URL
+  // and stores it in localStorage. Moving to cookie/header auth would
+  // require upstream OpenClaw changes. The nginx log format strips query
+  // params to mitigate server-side token leakage. The 302 redirect means
+  // the token-bearing URL is only in the browser, not in Referer headers
+  // (the redirect target URL replaces it in history).
   if (!subPath || subPath.length === 0) {
     if (!request.nextUrl.searchParams.has("token")) {
       const host = request.headers.get("host") || "localhost:3001";
@@ -139,7 +147,72 @@ export async function proxyRequest(
   localStorage.setItem("openclaw.control.settings.v1", ${JSON.stringify(settingsData)});
 })();
 </script>`;
-        html = html.replace("</head>", settingsScript + "</head>");
+
+        // Canvas relay bridge: forward Canvas button actions through the chat's
+        // WebSocket so they appear in the chat conversation.
+        const canvasRelayScript = `<script>
+(function() {
+  var bc = new BroadcastChannel(${JSON.stringify("clawgent-canvas-" + id)});
+  var chatWs = null;
+  var sessionKey = null;
+  var NativeWS = window.WebSocket;
+
+  window.WebSocket = function(url, protocols) {
+    var ws = protocols ? new NativeWS(url, protocols) : new NativeWS(url);
+    chatWs = ws;
+
+    ws.addEventListener("message", function(e) {
+      if (typeof e.data !== "string") return;
+      try {
+        var frame = JSON.parse(e.data);
+        // Extract sessionKey from connect response
+        if (frame.type === "res" && frame.ok && !sessionKey) {
+          var r = frame.result || frame.data || frame.payload || {};
+          var key = (r.snapshot && r.snapshot.sessionDefaults && r.snapshot.sessionDefaults.mainSessionKey)
+            || (r.sessionDefaults && r.sessionDefaults.mainSessionKey)
+            || r.mainSessionKey;
+          if (key) {
+            sessionKey = key;
+            bc.postMessage({ type: "relay-ready" });
+          }
+        }
+        // Forward A2UI events to Canvas via BroadcastChannel
+        if (frame.surfaceUpdate || frame.beginRendering || frame.deleteSurface || frame.dataModelUpdate) {
+          bc.postMessage({ type: "a2ui-event", event: frame });
+        }
+        // Forward chat events that may contain A2UI in code fences
+        if (frame.type === "event" && frame.event === "chat" && frame.payload) {
+          bc.postMessage({ type: "chat-event", frame: frame });
+        }
+      } catch(ex) {}
+    });
+
+    return ws;
+  };
+  window.WebSocket.prototype = NativeWS.prototype;
+  window.WebSocket.CONNECTING = NativeWS.CONNECTING;
+  window.WebSocket.OPEN = NativeWS.OPEN;
+  window.WebSocket.CLOSING = NativeWS.CLOSING;
+  window.WebSocket.CLOSED = NativeWS.CLOSED;
+
+  bc.onmessage = function(e) {
+    var d = e.data;
+    if (!d) return;
+    if (d.type === "canvas-action" && chatWs && chatWs.readyState === 1 && sessionKey) {
+      var aid = "canvas-" + Date.now() + "-" + Math.random().toString(36).slice(2,8);
+      chatWs.send(JSON.stringify({
+        type: "req", id: aid, method: "chat.send",
+        params: { sessionKey: sessionKey, message: "[Canvas] " + d.action, idempotencyKey: aid }
+      }));
+      bc.postMessage({ type: "action-ack", id: d.id });
+    }
+    if (d.type === "ping") {
+      bc.postMessage({ type: "pong", ready: !!(chatWs && chatWs.readyState === 1 && sessionKey) });
+    }
+  };
+})();
+</script>`;
+        html = html.replace("</head>", settingsScript + canvasRelayScript + "</head>");
         responseHeaders.delete("content-length");
 
         return new Response(html, {

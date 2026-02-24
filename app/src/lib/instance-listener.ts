@@ -19,6 +19,27 @@ type JsonObject = Record<string, unknown>;
 
 const POLL_INTERVAL = 2 * 60 * 1000; // 2 minutes
 
+/**
+ * Strip sensitive patterns from agent output before forwarding to WhatsApp.
+ * Prevents accidental leakage of API keys, tokens, and internal config.
+ */
+function filterSensitiveOutput(text: string): string {
+  return text
+    // API keys
+    .replace(/\bsk-ant-[A-Za-z0-9_-]{10,}/g, "[REDACTED_KEY]")
+    .replace(/\bsk-[A-Za-z0-9_-]{20,}/g, "[REDACTED_KEY]")
+    .replace(/\bAIza[A-Za-z0-9_-]{30,}/g, "[REDACTED_KEY]")
+    .replace(/\bkey-[A-Za-z0-9_-]{20,}/g, "[REDACTED_KEY]")
+    // Gateway tokens (hex, 32+ chars)
+    .replace(/\b[0-9a-f]{32,}\b/g, "[REDACTED_TOKEN]")
+    // Internal file paths
+    .replace(/\/home\/node\/\.openclaw\/[^\s)}\]"']*/g, "[INTERNAL_PATH]")
+    .replace(/\/opt\/clawgent\/[^\s)}\]"']*/g, "[INTERNAL_PATH]")
+    // Environment variable dumps
+    .replace(/OPENCLAW_GATEWAY_TOKEN=[^\s]+/g, "OPENCLAW_GATEWAY_TOKEN=[REDACTED]")
+    .replace(/(ANTHROPIC_API_KEY|GEMINI_API_KEY|OPENAI_API_KEY|NEX_API_KEY)=[^\s]+/g, "$1=[REDACTED]");
+}
+
 interface ListenerState {
   phone: string;
   instanceId: string;
@@ -156,7 +177,8 @@ async function connectListener(state: ListenerState, attempt: number): Promise<v
           if (text) {
             const inst = instances.get(state.instanceId);
             const agentDisplay = getAgentDisplay(inst);
-            const message = `${text}\n\n— _${agentDisplay}_`;
+            const filtered = filterSensitiveOutput(text);
+            const message = `${filtered}\n\n— _${agentDisplay}_`;
 
             // Dynamic import to avoid circular dependency with whatsapp.ts
             const { sendPlivoMessage } = await import("./whatsapp");
@@ -242,10 +264,11 @@ async function pollForProactiveMessages(state: ListenerState): Promise<void> {
       const text = extractMessageText(msg);
       if (!text) continue;
 
-      // Forward to WhatsApp
+      // Forward to WhatsApp (with sensitive data filtered)
       const inst = instances.get(state.instanceId);
       const agentDisplay = getAgentDisplay(inst);
-      const message = `${text}\n\n— _${agentDisplay}_`;
+      const filtered = filterSensitiveOutput(text);
+      const message = `${filtered}\n\n— _${agentDisplay}_`;
 
       const { sendPlivoMessage } = await import("./whatsapp");
       await sendPlivoMessage(state.phone, message);
