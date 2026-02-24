@@ -160,14 +160,15 @@ jobs:
             /opt/clawgent/ecosystem.config.js
           echo "Files synced from S3"'
 
-      - name: Pull latest OpenClaw Docker image
+      - name: Pull OpenClaw Docker image
         run: |
           source /tmp/ssm_run.sh
           ssm_run "Pull OpenClaw Docker image" 300 '
           set -euo pipefail
-          echo "Pulling latest OpenClaw image from ghcr.io..."
-          docker pull ghcr.io/openclaw/openclaw:latest
-          docker tag ghcr.io/openclaw/openclaw:latest clawgent-openclaw
+          OPENCLAW_VERSION="2026.2.23"
+          echo "Pulling OpenClaw ${OPENCLAW_VERSION} from ghcr.io..."
+          docker pull "ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}"
+          docker tag "ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}" clawgent-openclaw
           echo "OpenClaw image ready:"
           docker images clawgent-openclaw'
 
