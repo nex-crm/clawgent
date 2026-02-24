@@ -67,7 +67,8 @@ jobs:
             local desc="$1" timeout="$2" script="$3"
             echo "=== $desc ==="
             local params
-            params=$(jq -n --arg s "$script" \
+            params=$(jq -n --arg s "#!/bin/bash
+$script" \
               '{"commands": ($s | split("\n") | map(select(length > 0)))}')
             local cmd_id
             cmd_id=$(aws ssm send-command \
