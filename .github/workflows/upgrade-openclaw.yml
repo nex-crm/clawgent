@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "OpenClaw version to deploy (e.g. 2026.2.23)"
+        description: "OpenClaw version to deploy (e.g. 2026.2.26)"
         required: true
-        default: "2026.2.23"
+        default: "2026.2.26"
       dry_run:
         description: "Dry run — list containers but don't upgrade"
         required: false
@@ -35,7 +35,7 @@ jobs:
       - name: Validate version input
         run: |
           if ! echo "$OPENCLAW_VERSION" | grep -qE '^[0-9]{4}\.[0-9]+\.[0-9]+$'; then
-            echo "::error::Invalid version format: $OPENCLAW_VERSION (expected YYYY.M.D, e.g. 2026.2.23)"
+            echo "::error::Invalid version format: $OPENCLAW_VERSION (expected YYYY.M.D, e.g. 2026.2.26)"
             exit 1
           fi
           echo "Upgrading to OpenClaw ${OPENCLAW_VERSION}"
