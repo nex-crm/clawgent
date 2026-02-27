@@ -1661,8 +1661,10 @@ async function deployWhatsAppInstance(
     const dockerArgs = [
       "run", "-d",
       "--name", containerName,
+      "--network", "clawgent-net",
       "--pids-limit", "256",
       "--memory", CONTAINER_MEMORY,
+      "--memory-reservation", "768m",
       "--memory-swap", CONTAINER_MEMORY_SWAP,
       "--cpus", CONTAINER_CPUS,
       "--cap-drop", "SYS_ADMIN",
@@ -1682,7 +1684,7 @@ async function deployWhatsAppInstance(
       "-e", `OPENCLAW_GATEWAY_TOKEN=${token}`,
       "-e", "PORT=18789",
       "-e", `${providerConfig.envVar}=${apiKey}`,
-      "-e", "NODE_OPTIONS=--max-old-space-size=1024",
+      "-e", "NODE_OPTIONS=--max-old-space-size=768",
       "--restart", "unless-stopped",
       OPENCLAW_IMAGE,
       "node", "openclaw.mjs", "gateway",
@@ -1862,7 +1864,7 @@ async function injectGatewayConfig(instance: Instance, modelId?: string): Promis
 
   const controlUi = (gateway.controlUi || {}) as Record<string, unknown>;
   controlUi.allowedOrigins = ALLOWED_ORIGINS;
-  controlUi.allowInsecureAuth = true;
+  // allowInsecureAuth removed — all traffic is behind SSL via nginx
   gateway.controlUi = controlUi;
   config.gateway = gateway;
 
