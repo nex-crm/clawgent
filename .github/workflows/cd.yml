@@ -165,7 +165,7 @@ jobs:
           source /tmp/ssm_run.sh
           ssm_run "Pull OpenClaw Docker image" 300 '
           set -euo pipefail
-          OPENCLAW_VERSION="2026.2.23"
+          OPENCLAW_VERSION="2026.2.26"
           echo "Pulling OpenClaw ${OPENCLAW_VERSION} from ghcr.io..."
           docker pull "ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}"
           docker tag "ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}" clawgent-openclaw
