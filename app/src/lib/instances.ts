@@ -27,6 +27,7 @@ export interface Instance {
   modelId?: string;
   persona?: string;
   userId?: string;
+  nexApiKey?: string;
 }
 
 /**
@@ -184,6 +185,9 @@ if (!gb.__clawgent_listeners_bootstrapped) {
   import("./nex-skill-updater")
     .then((m) => m.startNexSkillUpdater())
     .catch((err) => console.error("[instances] Failed to start nex skill updater:", err));
+  import("./nex-plugin-updater")
+    .then((m) => m.startNexPluginUpdater())
+    .catch((err) => console.error("[instances] Failed to start nex plugin updater:", err));
 }
 
 const CONTAINER_PREFIX = "clawgent-";

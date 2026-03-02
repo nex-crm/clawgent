@@ -445,6 +445,28 @@ async function injectGatewayConfig(instance: Instance, modelId?: string): Promis
     config.agents = agents;
   }
 
+  // Memory-nex plugin: pre-configure plugin slots so the plugin activates
+  // once the agent registers and obtains a Nex API key.
+  const plugins = (config.plugins || {}) as Record<string, unknown>;
+  const load = (plugins.load || {}) as Record<string, unknown>;
+  load.paths = ["/plugins/memory-nex"];
+  plugins.load = load;
+
+  const slots = (plugins.slots || {}) as Record<string, unknown>;
+  slots.memory = "memory-nex";
+  plugins.slots = slots;
+
+  const entries = (plugins.entries || {}) as Record<string, unknown>;
+  entries["memory-nex"] = {
+    enabled: true,
+    config: {
+      apiKey: instance.nexApiKey || "",
+      baseUrl: "http://api:8080",
+    },
+  };
+  plugins.entries = entries;
+  config.plugins = plugins;
+
   // Write config into container
   const tmpDir = mkdtempSync(join(tmpdir(), "clawgent-gw-"));
   try {
