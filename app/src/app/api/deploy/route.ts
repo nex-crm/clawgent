@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
-import { writeFileSync, mkdtempSync, rmSync } from "fs";
-import { join } from "path";
+import { writeFileSync, mkdtempSync, rmSync, existsSync } from "fs";
+import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
 import { instances, type Instance, runCommand, runCommandSilent, reconcileWithDocker, findInstanceByAnyLinkedUserId, startPairingAutoApprover } from "@/lib/instances";
@@ -226,6 +226,15 @@ async function deployInstance(
     if (healthy) {
       addLog(instance, "Configuring instance (gateway + model + agent template)...");
 
+      // Plugin files first (must exist before gateway config references them)
+      try {
+        await injectPluginFiles(instance);
+        addLog(instance, "Memory plugin injected.");
+      } catch (pluginErr) {
+        const msg = pluginErr instanceof Error ? pluginErr.message : String(pluginErr);
+        addLog(instance, `Warning: plugin injection failed (${msg}).`);
+      }
+
       // Gateway + model config first (writes openclaw.json)
       try {
         await injectGatewayConfig(instance, modelId);
@@ -400,6 +409,35 @@ async function allocatePort(): Promise<number> {
 }
 
 /**
+ * Copy the bundled nex plugin files into a container.
+ *
+ * The stock OpenClaw image from ghcr.io doesn't include the plugin,
+ * so we docker-cp the pre-built dist from app/plugins/nex/.
+ * This must run before injectGatewayConfig (which references the plugin path).
+ */
+async function injectPluginFiles(instance: Instance): Promise<void> {
+  // Resolve plugin dir relative to the app root (works in both dev and production)
+  const pluginSrc = resolve(process.cwd(), "plugins", "nex");
+  if (!existsSync(pluginSrc)) {
+    console.warn("[deploy] Plugin source not found at", pluginSrc, "— skipping plugin injection");
+    return;
+  }
+
+  // Create /plugins/nex in the container and copy files
+  await runCommand("docker", [
+    "exec", "-u", "root", instance.containerName,
+    "mkdir", "-p", "/plugins/nex",
+  ]);
+  await runCommand("docker", [
+    "cp", `${pluginSrc}/.`, `${instance.containerName}:/plugins/nex/`,
+  ]);
+  await runCommand("docker", [
+    "exec", "-u", "root", instance.containerName,
+    "chown", "-R", "node:node", "/plugins/nex",
+  ]);
+}
+
+/**
  * Inject gateway config (and optionally the default model) into the
  * OpenClaw container by writing directly to openclaw.json.
  *
@@ -445,26 +483,30 @@ async function injectGatewayConfig(instance: Instance, modelId?: string): Promis
     config.agents = agents;
   }
 
-  // Memory-nex plugin: pre-configure plugin slots so the plugin activates
+  // Nex plugin: pre-configure plugin slots so the plugin activates
   // once the agent registers and obtains a Nex API key.
   const plugins = (config.plugins || {}) as Record<string, unknown>;
-  const load = (plugins.load || {}) as Record<string, unknown>;
-  load.paths = ["/plugins/memory-nex"];
-  plugins.load = load;
 
-  const slots = (plugins.slots || {}) as Record<string, unknown>;
-  slots.memory = "memory-nex";
-  plugins.slots = slots;
+  if (instance.nexApiKey) {
+    const load = (plugins.load || {}) as Record<string, unknown>;
+    load.paths = ["/plugins/nex"];
+    plugins.load = load;
 
-  const entries = (plugins.entries || {}) as Record<string, unknown>;
-  entries["memory-nex"] = {
-    enabled: true,
-    config: {
-      apiKey: instance.nexApiKey || "",
-      baseUrl: "http://api:8080",
-    },
-  };
-  plugins.entries = entries;
+    const slots = (plugins.slots || {}) as Record<string, unknown>;
+    slots.memory = "nex";
+    plugins.slots = slots;
+
+    const entries = (plugins.entries || {}) as Record<string, unknown>;
+    entries["nex"] = {
+      enabled: true,
+      config: {
+        apiKey: instance.nexApiKey,
+        baseUrl: "http://api:8080",
+      },
+    };
+    plugins.entries = entries;
+  }
+
   config.plugins = plugins;
 
   // Write config into container

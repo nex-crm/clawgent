@@ -197,6 +197,15 @@ jobs:
               echo "WARNING: ${CONTAINER} may not be fully healthy yet"
               UPGRADED=$((UPGRADED + 1))
             fi
+            # Inject nex memory plugin files (stock image doesn't include them)
+            PLUGIN_SRC="/opt/clawgent/app/plugins/nex"
+            if [ -d "$PLUGIN_SRC" ]; then
+              echo "Injecting nex plugin into ${CONTAINER}..."
+              docker exec -u root "$CONTAINER" mkdir -p /plugins/nex 2>/dev/null || true
+              docker cp "${PLUGIN_SRC}/." "${CONTAINER}:/plugins/nex/" 2>/dev/null || true
+              docker exec -u root "$CONTAINER" chown -R node:node /plugins/nex 2>/dev/null || true
+              echo "Plugin injected"
+            fi
           done
           echo ""
           echo "=============================="

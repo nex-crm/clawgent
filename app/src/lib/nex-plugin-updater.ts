@@ -1,9 +1,9 @@
 /**
- * Memory-nex plugin config updater.
+ * Nex plugin config updater.
  *
  * Periodically checks running containers for a Nex API key
  * (written by the agent during registration) and ensures the
- * memory-nex plugin config in openclaw.json stays in sync.
+ * nex plugin config in openclaw.json stays in sync.
  *
  * Same lifecycle pattern as key-validator.ts / nex-skill-updater.ts:
  *   - 90s startup delay (after skill updater)
@@ -11,8 +11,8 @@
  *   - .unref() timers so they don't block process exit
  */
 
-import { writeFileSync, mkdtempSync, rmSync } from "fs";
-import { join } from "path";
+import { writeFileSync, mkdtempSync, rmSync, existsSync } from "fs";
+import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { instances, runCommand, runCommandSilent } from "./instances";
 
@@ -40,7 +40,7 @@ async function readNexApiKeyFromContainer(containerName: string): Promise<string
 }
 
 /**
- * Read the current memory-nex plugin apiKey from the container's openclaw.json.
+ * Read the current nex plugin apiKey from the container's openclaw.json.
  */
 async function readPluginApiKeyFromContainer(containerName: string): Promise<string | null> {
   try {
@@ -48,7 +48,7 @@ async function readPluginApiKeyFromContainer(containerName: string): Promise<str
       "exec", containerName, "cat", OPENCLAW_CONFIG_PATH,
     ]);
     const config = JSON.parse(raw);
-    const key = config?.plugins?.entries?.["memory-nex"]?.config?.apiKey;
+    const key = config?.plugins?.entries?.["nex"]?.config?.apiKey;
     return typeof key === "string" ? key : null;
   } catch {
     return null;
@@ -56,7 +56,7 @@ async function readPluginApiKeyFromContainer(containerName: string): Promise<str
 }
 
 /**
- * Update the memory-nex plugin config in a container's openclaw.json.
+ * Update the nex plugin config in a container's openclaw.json.
  */
 async function updatePluginConfig(containerName: string, nexApiKey: string): Promise<void> {
   let config: Record<string, unknown> = {};
@@ -71,15 +71,15 @@ async function updatePluginConfig(containerName: string, nexApiKey: string): Pro
 
   const plugins = (config.plugins || {}) as Record<string, unknown>;
   const load = (plugins.load || {}) as Record<string, unknown>;
-  load.paths = ["/plugins/memory-nex"];
+  load.paths = ["/plugins/nex"];
   plugins.load = load;
 
   const slots = (plugins.slots || {}) as Record<string, unknown>;
-  slots.memory = "memory-nex";
+  slots.memory = "nex";
   plugins.slots = slots;
 
   const entries = (plugins.entries || {}) as Record<string, unknown>;
-  entries["memory-nex"] = {
+  entries["nex"] = {
     enabled: true,
     config: {
       apiKey: nexApiKey,
@@ -116,7 +116,40 @@ async function updatePluginConfig(containerName: string, nexApiKey: string): Pro
 }
 
 /**
- * Check all running containers and sync memory-nex plugin config
+ * Ensure the plugin JS files exist at /plugins/nex inside the container.
+ * After an image upgrade the stock OpenClaw image won't have them, so we
+ * re-inject from the bundled copy in app/plugins/nex/.
+ */
+async function ensurePluginFiles(containerName: string): Promise<boolean> {
+  // Check if plugin files already exist in the container
+  try {
+    await runCommandSilent("docker", [
+      "exec", containerName, "test", "-f", "/plugins/nex/openclaw.plugin.json",
+    ]);
+    return false; // Already present
+  } catch {
+    // Not present — inject
+  }
+
+  const pluginSrc = resolve(process.cwd(), "plugins", "nex");
+  if (!existsSync(pluginSrc)) {
+    return false; // No local plugin bundle available
+  }
+
+  await runCommand("docker", [
+    "exec", "-u", "root", containerName, "mkdir", "-p", "/plugins/nex",
+  ]);
+  await runCommand("docker", [
+    "cp", `${pluginSrc}/.`, `${containerName}:/plugins/nex/`,
+  ]);
+  await runCommand("docker", [
+    "exec", "-u", "root", containerName, "chown", "-R", "node:node", "/plugins/nex",
+  ]);
+  return true;
+}
+
+/**
+ * Check all running containers and sync nex plugin config
  * with the Nex API key the agent registered.
  */
 async function syncPluginConfigs(): Promise<void> {
@@ -126,6 +159,16 @@ async function syncPluginConfigs(): Promise<void> {
     if (instance.status !== "running") continue;
 
     try {
+      // Ensure plugin JS files are present (may be missing after image upgrade)
+      try {
+        const injected = await ensurePluginFiles(instance.containerName);
+        if (injected) {
+          console.log(`[nex-plugin-updater] Injected plugin files into ${instance.containerName}`);
+        }
+      } catch (err) {
+        console.warn(`[nex-plugin-updater] Could not inject plugin files into ${instance.containerName}:`, err);
+      }
+
       // Read the Nex API key from the container (set by agent registration)
       const nexApiKey = await readNexApiKeyFromContainer(instance.containerName);
       if (!nexApiKey) continue;
@@ -142,7 +185,7 @@ async function syncPluginConfigs(): Promise<void> {
       // Key mismatch or plugin not configured — push updated config
       await updatePluginConfig(instance.containerName, nexApiKey);
       synced++;
-      console.log(`[nex-plugin-updater] Synced memory-nex plugin config for ${instance.containerName}`);
+      console.log(`[nex-plugin-updater] Synced nex plugin config for ${instance.containerName}`);
     } catch (err) {
       console.error(`[nex-plugin-updater] Failed to sync ${instance.containerName}:`, err);
     }
