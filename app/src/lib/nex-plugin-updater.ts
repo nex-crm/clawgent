@@ -15,6 +15,7 @@ import { writeFileSync, mkdtempSync, rmSync, existsSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { instances, runCommand, runCommandSilent } from "./instances";
+import { applyNexPluginConfig } from "./nex-plugin-config";
 
 const OPENCLAW_CONFIG_PATH = "/home/node/.openclaw/openclaw.json";
 const FIVE_MINUTES = 5 * 60 * 1000;
@@ -69,25 +70,7 @@ async function updatePluginConfig(containerName: string, nexApiKey: string): Pro
     // Config may not exist — create from scratch
   }
 
-  const plugins = (config.plugins || {}) as Record<string, unknown>;
-  const load = (plugins.load || {}) as Record<string, unknown>;
-  load.paths = ["/plugins/nex"];
-  plugins.load = load;
-
-  const slots = (plugins.slots || {}) as Record<string, unknown>;
-  slots.memory = "nex";
-  plugins.slots = slots;
-
-  const entries = (plugins.entries || {}) as Record<string, unknown>;
-  entries["nex"] = {
-    enabled: true,
-    config: {
-      apiKey: nexApiKey,
-      baseUrl: "http://api:8080",
-    },
-  };
-  plugins.entries = entries;
-  config.plugins = plugins;
+  applyNexPluginConfig(config, nexApiKey);
 
   const tmpDir = mkdtempSync(join(tmpdir(), "clawgent-plugin-"));
   try {

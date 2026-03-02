@@ -7,6 +7,7 @@ import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
 import { instances, type Instance, runCommand, runCommandSilent, reconcileWithDocker, findInstanceByAnyLinkedUserId, startPairingAutoApprover } from "@/lib/instances";
 import { PERSONA_CONFIGS } from "@/lib/personas";
 import { configureAgentPersona } from "@/lib/agent-config";
+import { applyNexPluginConfig } from "@/lib/nex-plugin-config";
 import { getPostHogClient } from "@/lib/posthog-server";
 import { dbGetLinkedByWebUser, dbGetWaSession, dbUpsertWaSession } from "@/lib/db";
 import { sendPlivoMessage } from "@/lib/whatsapp";
@@ -485,29 +486,7 @@ async function injectGatewayConfig(instance: Instance, modelId?: string): Promis
 
   // Nex plugin: pre-configure plugin slots so the plugin activates
   // once the agent registers and obtains a Nex API key.
-  const plugins = (config.plugins || {}) as Record<string, unknown>;
-
-  if (instance.nexApiKey) {
-    const load = (plugins.load || {}) as Record<string, unknown>;
-    load.paths = ["/plugins/nex"];
-    plugins.load = load;
-
-    const slots = (plugins.slots || {}) as Record<string, unknown>;
-    slots.memory = "nex";
-    plugins.slots = slots;
-
-    const entries = (plugins.entries || {}) as Record<string, unknown>;
-    entries["nex"] = {
-      enabled: true,
-      config: {
-        apiKey: instance.nexApiKey,
-        baseUrl: "http://api:8080",
-      },
-    };
-    plugins.entries = entries;
-  }
-
-  config.plugins = plugins;
+  applyNexPluginConfig(config, instance.nexApiKey);
 
   // Write config into container
   const tmpDir = mkdtempSync(join(tmpdir(), "clawgent-gw-"));

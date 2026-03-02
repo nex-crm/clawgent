@@ -21,6 +21,7 @@ import {
 } from "./instances";
 import { PERSONA_CONFIGS } from "./personas";
 import { configureAgentPersona } from "./agent-config";
+import { applyNexPluginConfig } from "./nex-plugin-config";
 import { sendChatMessage } from "./openclaw-client";
 import { trackOutboundRun, untrackOutboundRun, startInstanceListener, stopInstanceListener } from "./instance-listener";
 import { getPostHogClient } from "./posthog-server";
@@ -1882,29 +1883,7 @@ async function injectGatewayConfig(instance: Instance, modelId?: string): Promis
 
   // Nex plugin: pre-configure plugin slots so the plugin activates
   // once the agent registers and obtains a Nex API key.
-  const plugins = (config.plugins || {}) as Record<string, unknown>;
-
-  if (instance.nexApiKey) {
-    const load = (plugins.load || {}) as Record<string, unknown>;
-    load.paths = ["/plugins/nex"];
-    plugins.load = load;
-
-    const slots = (plugins.slots || {}) as Record<string, unknown>;
-    slots.memory = "nex";
-    plugins.slots = slots;
-
-    const entries = (plugins.entries || {}) as Record<string, unknown>;
-    entries["nex"] = {
-      enabled: true,
-      config: {
-        apiKey: instance.nexApiKey,
-        baseUrl: "http://api:8080",
-      },
-    };
-    plugins.entries = entries;
-  }
-
-  config.plugins = plugins;
+  applyNexPluginConfig(config, instance.nexApiKey);
 
   const tmpDir = mkdtempSync(join(tmpdir(), "clawgent-gw-"));
   try {
