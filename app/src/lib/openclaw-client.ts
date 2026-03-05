@@ -86,9 +86,8 @@ export class OpenClawClient {
       let connectSent = false;
       let connectTimer: ReturnType<typeof setTimeout> | null = null;
 
-      const origin = process.env.NODE_ENV === "production"
-        ? "https://clawgent.ai"
-        : `http://localhost:${process.env.PORT ?? 3001}`;
+      // Always use localhost origin — we connect locally to Docker containers
+      const origin = `http://localhost:${this.port}`;
       const ws = new WS(wsUrl, { origin });
       this.ws = ws as unknown as WebSocket;
 
