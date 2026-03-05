@@ -68,7 +68,7 @@ jobs:
             echo "=== $desc ==="
             local params
             params=$(jq -n --arg s "$script" \
-              '{"commands": ($s | split("\n") | map(select(length > 0)))}')
+              '{"commands": (["#!/bin/bash"] + ($s | split("\n") | map(select(length > 0))))}')
             local cmd_id
             cmd_id=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
