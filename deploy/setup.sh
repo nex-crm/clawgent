@@ -14,7 +14,7 @@ apt-get update && apt-get upgrade -y
 
 # 2. Install build tools (needed for better-sqlite3 native addon)
 echo "[2/9] Installing build tools..."
-apt-get install -y build-essential python3 lsof
+apt-get install -y build-essential python3 lsof sqlite3
 
 # 3. Install Docker
 echo "[3/9] Installing Docker..."
