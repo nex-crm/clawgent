@@ -484,9 +484,13 @@ async function injectGatewayConfig(instance: Instance, modelId?: string): Promis
     config.agents = agents;
   }
 
-  // Nex plugin: pre-configure plugin slots so the plugin activates
-  // once the agent registers and obtains a Nex API key.
-  applyNexPluginConfig(config, instance.nexApiKey);
+  // OpenClaw 2026.3.2+ defaults tools.profile to "messaging" for new installs,
+  // which restricts the tool surface. Set to "default" for full capabilities.
+  const tools = (config.tools || {}) as Record<string, unknown>;
+  if (!tools.profile) {
+    tools.profile = "default";
+    config.tools = tools;
+  }
 
   // Write config into container
   const tmpDir = mkdtempSync(join(tmpdir(), "clawgent-gw-"));
