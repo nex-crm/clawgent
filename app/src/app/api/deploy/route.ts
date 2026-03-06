@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
-import { writeFileSync, mkdtempSync, rmSync } from "fs";
-import { join } from "path";
+import { writeFileSync, mkdtempSync, rmSync, existsSync } from "fs";
+import { join, resolve } from "path";
 import { tmpdir } from "os";
 import { isWorkOSConfigured, DEV_USER_ID } from "@/lib/auth-config";
 import { instances, type Instance, runCommand, runCommandSilent, reconcileWithDocker, findInstanceByAnyLinkedUserId, startPairingAutoApprover } from "@/lib/instances";
 import { PERSONA_CONFIGS } from "@/lib/personas";
 import { configureAgentPersona } from "@/lib/agent-config";
+import { applyNexPluginConfig } from "@/lib/nex-plugin-config";
 import { getPostHogClient } from "@/lib/posthog-server";
 import { dbGetLinkedByWebUser, dbGetWaSession, dbUpsertWaSession } from "@/lib/db";
 import { sendPlivoMessage } from "@/lib/whatsapp";
@@ -226,6 +227,15 @@ async function deployInstance(
     if (healthy) {
       addLog(instance, "Configuring instance (gateway + model + agent template)...");
 
+      // Plugin files first (must exist before gateway config references them)
+      try {
+        await injectPluginFiles(instance);
+        addLog(instance, "Memory plugin injected.");
+      } catch (pluginErr) {
+        const msg = pluginErr instanceof Error ? pluginErr.message : String(pluginErr);
+        addLog(instance, `Warning: plugin injection failed (${msg}).`);
+      }
+
       // Gateway + model config first (writes openclaw.json)
       try {
         await injectGatewayConfig(instance, modelId);
@@ -397,6 +407,35 @@ async function allocatePort(): Promise<number> {
   }
 
   throw new Error("No available ports in range");
+}
+
+/**
+ * Copy the bundled nex plugin files into a container.
+ *
+ * The stock OpenClaw image from ghcr.io doesn't include the plugin,
+ * so we docker-cp the pre-built dist from app/plugins/nex/.
+ * This must run before injectGatewayConfig (which references the plugin path).
+ */
+async function injectPluginFiles(instance: Instance): Promise<void> {
+  // Resolve plugin dir relative to the app root (works in both dev and production)
+  const pluginSrc = resolve(process.cwd(), "plugins", "nex");
+  if (!existsSync(pluginSrc)) {
+    console.warn("[deploy] Plugin source not found at", pluginSrc, "— skipping plugin injection");
+    return;
+  }
+
+  // Create /plugins/nex in the container and copy files
+  await runCommand("docker", [
+    "exec", "-u", "root", instance.containerName,
+    "mkdir", "-p", "/plugins/nex",
+  ]);
+  await runCommand("docker", [
+    "cp", `${pluginSrc}/.`, `${instance.containerName}:/plugins/nex/`,
+  ]);
+  await runCommand("docker", [
+    "exec", "-u", "root", instance.containerName,
+    "chown", "-R", "node:node", "/plugins/nex",
+  ]);
 }
 
 /**
