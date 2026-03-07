@@ -11,11 +11,15 @@ mkdirSync(dirname(DB_PATH), { recursive: true });
 // Singleton: survive Next.js hot reloads via globalThis
 const g = globalThis as unknown as { __clawgent_db?: Database.Database };
 if (!g.__clawgent_db) {
-  g.__clawgent_db = new Database(DB_PATH);
-  g.__clawgent_db.pragma("journal_mode = WAL");
-  g.__clawgent_db.pragma("foreign_keys = ON");
+  const _buildMode = process.env.CLAWGENT_BUILD === "1";
+  g.__clawgent_db = new Database(DB_PATH, { readonly: _buildMode });
+  if (!_buildMode) {
+    g.__clawgent_db.pragma("journal_mode = WAL");
+    g.__clawgent_db.pragma("wal_checkpoint(TRUNCATE)");
+    g.__clawgent_db.pragma("foreign_keys = ON");
+  }
 
-  g.__clawgent_db.exec(`
+  if (!_buildMode) g.__clawgent_db.exec(`
     CREATE TABLE IF NOT EXISTS instances (
       id            TEXT PRIMARY KEY,
       containerName TEXT NOT NULL,
@@ -86,37 +90,39 @@ if (!g.__clawgent_db) {
     CREATE INDEX IF NOT EXISTS idx_link_codes_phone ON link_codes(phone);
   `);
 
-  // Migration: add expiresAt column if it doesn't exist (for existing DBs)
-  const cols = g.__clawgent_db
-    .prepare("PRAGMA table_info(instances)")
-    .all() as { name: string }[];
-  if (!cols.some((c) => c.name === "expiresAt")) {
-    g.__clawgent_db.exec("ALTER TABLE instances ADD COLUMN expiresAt TEXT");
-  }
-
-  // Migration: add activeAgent column to whatsapp_sessions (for pre-existing DBs).
-  // Wrapped in try/catch — build-time workers can race past the PRAGMA check.
-  try {
-    const waCols = g.__clawgent_db
-      .prepare("PRAGMA table_info(whatsapp_sessions)")
+  if (!_buildMode) {
+    // Migration: add expiresAt column if it doesn't exist (for existing DBs)
+    const cols = g.__clawgent_db
+      .prepare("PRAGMA table_info(instances)")
       .all() as { name: string }[];
-    if (!waCols.some((c) => c.name === "activeAgent")) {
-      g.__clawgent_db.exec("ALTER TABLE whatsapp_sessions ADD COLUMN activeAgent TEXT");
+    if (!cols.some((c) => c.name === "expiresAt")) {
+      g.__clawgent_db.exec("ALTER TABLE instances ADD COLUMN expiresAt TEXT");
     }
-  } catch {
-    // Column already added by a concurrent worker — safe to ignore.
-  }
 
-  // Migration: add unlinked_at column to linked_accounts
-  try {
-    const linkCols = g.__clawgent_db
-      .prepare("PRAGMA table_info(linked_accounts)")
-      .all() as { name: string }[];
-    if (linkCols.length > 0 && !linkCols.some((c) => c.name === "unlinked_at")) {
-      g.__clawgent_db.exec("ALTER TABLE linked_accounts ADD COLUMN unlinked_at TEXT");
+    // Migration: add activeAgent column to whatsapp_sessions (for pre-existing DBs).
+    // Wrapped in try/catch — build-time workers can race past the PRAGMA check.
+    try {
+      const waCols = g.__clawgent_db
+        .prepare("PRAGMA table_info(whatsapp_sessions)")
+        .all() as { name: string }[];
+      if (!waCols.some((c) => c.name === "activeAgent")) {
+        g.__clawgent_db.exec("ALTER TABLE whatsapp_sessions ADD COLUMN activeAgent TEXT");
+      }
+    } catch {
+      // Column already added by a concurrent worker — safe to ignore.
     }
-  } catch {
-    // Table may not exist yet (will be created by CREATE TABLE IF NOT EXISTS above)
+
+    // Migration: add unlinked_at column to linked_accounts
+    try {
+      const linkCols = g.__clawgent_db
+        .prepare("PRAGMA table_info(linked_accounts)")
+        .all() as { name: string }[];
+      if (linkCols.length > 0 && !linkCols.some((c) => c.name === "unlinked_at")) {
+        g.__clawgent_db.exec("ALTER TABLE linked_accounts ADD COLUMN unlinked_at TEXT");
+      }
+    } catch {
+      // Table may not exist yet (will be created by CREATE TABLE IF NOT EXISTS above)
+    }
   }
 }
 
@@ -138,7 +144,24 @@ const stmtUpsert = db.prepare(`
     provider      = @provider,
     modelId       = @modelId,
     persona       = @persona,
-    userId        = @userId
+    userId        = COALESCE(@userId, instances.userId)
+`);
+
+// Flush-only upsert: NEVER touches userId (prevents periodic flush from wiping user ownership).
+const stmtFlush = db.prepare(`
+  INSERT INTO instances (id, containerName, port, token, status, dashboardUrl, createdAt, expiresAt, logs, provider, modelId, persona, userId)
+  VALUES (@id, @containerName, @port, @token, @status, @dashboardUrl, @createdAt, @expiresAt, @logs, @provider, @modelId, @persona, @userId)
+  ON CONFLICT(id) DO UPDATE SET
+    containerName = @containerName,
+    port          = @port,
+    token         = @token,
+    status        = @status,
+    dashboardUrl  = @dashboardUrl,
+    expiresAt     = @expiresAt,
+    logs          = @logs,
+    provider      = @provider,
+    modelId       = @modelId,
+    persona       = @persona
 `);
 
 const stmtGetById = db.prepare("SELECT * FROM instances WHERE id = ?");
@@ -198,6 +221,13 @@ const stmtMarkLinkCodeUsed = db.prepare("UPDATE link_codes SET used = 1 WHERE co
 const stmtCleanupExpiredLinkCodes = db.prepare(
   "DELETE FROM link_codes WHERE expires_at < ? OR used = 1"
 );
+
+/** True during `next build` — skip all DB writes to prevent wiping userId.
+ *  CLAWGENT_BUILD is set explicitly in package.json build script.
+ *  NEXT_PHASE is set by Next.js but may not propagate to workers. */
+function isBuildTime(): boolean {
+  return process.env.CLAWGENT_BUILD === "1" || process.env.NEXT_PHASE === "phase-production-build";
+}
 
 function rowToInstance(row: Record<string, unknown>): Instance {
   return {
@@ -270,10 +300,18 @@ export function dbGetAllInstances(): Instance[] {
 }
 
 export function dbUpsertInstance(inst: Instance): void {
+  if (isBuildTime()) return;
   stmtUpsert.run(instanceToRow(inst));
 }
 
+/** Flush-safe upsert: persists status/logs/etc but NEVER overwrites userId. */
+export function dbFlushInstance(inst: Instance): void {
+  if (isBuildTime()) return;
+  stmtFlush.run(instanceToRow(inst));
+}
+
 export function dbDeleteInstance(id: string): void {
+  if (isBuildTime()) return;
   stmtDelete.run(id);
 }
 

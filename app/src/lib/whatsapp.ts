@@ -134,19 +134,17 @@ const API_KEY_PREFIXES: Record<string, { prefix: string; hint: string }> = {
 // --- Interactive message types ---
 
 const PERSONA_DESCRIPTIONS: Record<string, string> = {
-  "marketing-pro": "Content, campaigns, analytics",
-  "sales-assistant": "Outreach, follow-ups, CRM",
-  "lead-gen": "Prospecting, qualification",
-  "gtm-engineer": "Launch strategy, go-to-market",
-  "dev-copilot": "Code, debug, review",
-  "support-agent": "Tickets, docs, customer help",
-  "ops-automator": "CI/CD, infra, monitoring",
-  "data-analyst": "SQL, dashboards, insights",
-  "founder-sidekick": "Strategy, decisions, planning",
+  "crm-agent": "Pipeline, contacts, deals",
+  "enrichment-engine": "Lead enrichment, data quality",
+  "sales-engagement": "Outreach, sequences, follow-ups",
+  "help-desk": "Tickets, SLA, customer support",
+  "customer-success": "Health scores, retention, upsell",
+  "marketing-automation": "Campaigns, email, analytics",
+  "revenue-intelligence": "Forecasting, pipeline analytics",
 };
 
-const BUSINESS_PERSONAS = ["marketing-pro", "sales-assistant", "lead-gen", "gtm-engineer"];
-const TECHNICAL_PERSONAS = ["dev-copilot", "support-agent", "ops-automator", "data-analyst", "founder-sidekick"];
+const BUSINESS_PERSONAS = ["crm-agent", "sales-engagement", "marketing-automation", "revenue-intelligence"];
+const TECHNICAL_PERSONAS = ["enrichment-engine", "help-desk", "customer-success"];
 
 interface PlivoInteractiveList {
   type: "list";

@@ -64,7 +64,7 @@ export const CONTAINER_CPUS = process.env.CONTAINER_CPUS ?? "0.5";
 /** Trusted proxy CIDRs for gateway config. */
 export const TRUSTED_PROXIES: string[] = process.env.TRUSTED_PROXIES
   ? process.env.TRUSTED_PROXIES.split(",").map((s) => s.trim())
-  : ["172.17.0.0/16", "127.0.0.1"];
+  : ["172.16.0.0/12", "127.0.0.1"];
 
 /** Allowed origins for OpenClaw gateway control UI — derived from BASE_URL by default. */
 export const ALLOWED_ORIGINS: string[] = process.env.ALLOWED_ORIGINS

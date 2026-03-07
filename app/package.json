@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "dev:next": "next dev",
-    "build": "next build",
+    "build": "sqlite3 data/clawgent.db 'PRAGMA wal_checkpoint(TRUNCATE)' 2>/dev/null; CLAWGENT_BUILD=1 next build",
     "start": "NODE_ENV=production tsx server.ts",
     "lint": "eslint"
   },
