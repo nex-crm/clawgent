@@ -2,8 +2,11 @@ import { db } from "./db";
 
 const DAILY_LIMIT = 200;
 
-const stmtGetUsage = db.prepare("SELECT callCount FROM usage_tracking WHERE userId = ? AND date = ?");
-const stmtUpsertUsage = db.prepare(`
+const _isBuild = process.env.CLAWGENT_BUILD === "1"
+  || process.env.NEXT_PHASE === "phase-production-build";
+
+const stmtGetUsage = _isBuild ? null : db.prepare("SELECT callCount FROM usage_tracking WHERE userId = ? AND date = ?");
+const stmtUpsertUsage = _isBuild ? null : db.prepare(`
   INSERT INTO usage_tracking (userId, date, callCount) VALUES (?, ?, 1)
   ON CONFLICT(userId, date) DO UPDATE SET callCount = callCount + 1
 `);
@@ -19,12 +22,14 @@ function nextMidnightUTC(): string {
 }
 
 export function getUsageCount(userId: string, date: string): number {
-  const row = stmtGetUsage.get(userId, date) as { callCount: number } | undefined;
+  if (_isBuild) return 0;
+  const row = stmtGetUsage!.get(userId, date) as { callCount: number } | undefined;
   return row?.callCount ?? 0;
 }
 
 export function incrementUsage(userId: string, date: string): void {
-  stmtUpsertUsage.run(userId, date);
+  if (_isBuild) return;
+  stmtUpsertUsage!.run(userId, date);
 }
 
 export function checkRateLimit(userId: string): { allowed: boolean; remaining: number; resetAt: string } {

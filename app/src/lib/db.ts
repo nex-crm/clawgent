@@ -5,21 +5,27 @@ import type { Instance } from "./instances";
 
 const DB_PATH = join(process.cwd(), "data", "clawgent.db");
 
-// Ensure data directory exists
+// ── Build-time guard ────────────────────────────────────────────────
+// During `next build`, do NOT open the database at all. The readonly
+// flag alone is insufficient — SQLite WAL mode still writes to the WAL
+// even with SQLITE_OPEN_READONLY on some platforms (ARM64/Graviton).
+// Instead, we export a null db and make every function a no-op / empty
+// return. This completely eliminates build-time DB corruption.
+const _isBuild = process.env.CLAWGENT_BUILD === "1"
+  || process.env.NEXT_PHASE === "phase-production-build";
+
+// Ensure data directory exists (safe during build — just a mkdir)
 mkdirSync(dirname(DB_PATH), { recursive: true });
 
 // Singleton: survive Next.js hot reloads via globalThis
 const g = globalThis as unknown as { __clawgent_db?: Database.Database };
-if (!g.__clawgent_db) {
-  const _buildMode = process.env.CLAWGENT_BUILD === "1";
-  g.__clawgent_db = new Database(DB_PATH, { readonly: _buildMode });
-  if (!_buildMode) {
-    g.__clawgent_db.pragma("journal_mode = WAL");
-    g.__clawgent_db.pragma("wal_checkpoint(TRUNCATE)");
-    g.__clawgent_db.pragma("foreign_keys = ON");
-  }
+if (!g.__clawgent_db && !_isBuild) {
+  g.__clawgent_db = new Database(DB_PATH);
+  g.__clawgent_db.pragma("journal_mode = WAL");
+  g.__clawgent_db.pragma("wal_checkpoint(TRUNCATE)");
+  g.__clawgent_db.pragma("foreign_keys = ON");
 
-  if (!_buildMode) g.__clawgent_db.exec(`
+  g.__clawgent_db.exec(`
     CREATE TABLE IF NOT EXISTS instances (
       id            TEXT PRIMARY KEY,
       containerName TEXT NOT NULL,
@@ -90,47 +96,47 @@ if (!g.__clawgent_db) {
     CREATE INDEX IF NOT EXISTS idx_link_codes_phone ON link_codes(phone);
   `);
 
-  if (!_buildMode) {
-    // Migration: add expiresAt column if it doesn't exist (for existing DBs)
-    const cols = g.__clawgent_db
-      .prepare("PRAGMA table_info(instances)")
+  // Migration: add expiresAt column if it doesn't exist (for existing DBs)
+  const cols = g.__clawgent_db
+    .prepare("PRAGMA table_info(instances)")
+    .all() as { name: string }[];
+  if (!cols.some((c) => c.name === "expiresAt")) {
+    g.__clawgent_db.exec("ALTER TABLE instances ADD COLUMN expiresAt TEXT");
+  }
+
+  // Migration: add activeAgent column to whatsapp_sessions
+  try {
+    const waCols = g.__clawgent_db
+      .prepare("PRAGMA table_info(whatsapp_sessions)")
       .all() as { name: string }[];
-    if (!cols.some((c) => c.name === "expiresAt")) {
-      g.__clawgent_db.exec("ALTER TABLE instances ADD COLUMN expiresAt TEXT");
+    if (!waCols.some((c) => c.name === "activeAgent")) {
+      g.__clawgent_db.exec("ALTER TABLE whatsapp_sessions ADD COLUMN activeAgent TEXT");
     }
+  } catch {
+    // Column already added by a concurrent worker — safe to ignore.
+  }
 
-    // Migration: add activeAgent column to whatsapp_sessions (for pre-existing DBs).
-    // Wrapped in try/catch — build-time workers can race past the PRAGMA check.
-    try {
-      const waCols = g.__clawgent_db
-        .prepare("PRAGMA table_info(whatsapp_sessions)")
-        .all() as { name: string }[];
-      if (!waCols.some((c) => c.name === "activeAgent")) {
-        g.__clawgent_db.exec("ALTER TABLE whatsapp_sessions ADD COLUMN activeAgent TEXT");
-      }
-    } catch {
-      // Column already added by a concurrent worker — safe to ignore.
+  // Migration: add unlinked_at column to linked_accounts
+  try {
+    const linkCols = g.__clawgent_db
+      .prepare("PRAGMA table_info(linked_accounts)")
+      .all() as { name: string }[];
+    if (linkCols.length > 0 && !linkCols.some((c) => c.name === "unlinked_at")) {
+      g.__clawgent_db.exec("ALTER TABLE linked_accounts ADD COLUMN unlinked_at TEXT");
     }
-
-    // Migration: add unlinked_at column to linked_accounts
-    try {
-      const linkCols = g.__clawgent_db
-        .prepare("PRAGMA table_info(linked_accounts)")
-        .all() as { name: string }[];
-      if (linkCols.length > 0 && !linkCols.some((c) => c.name === "unlinked_at")) {
-        g.__clawgent_db.exec("ALTER TABLE linked_accounts ADD COLUMN unlinked_at TEXT");
-      }
-    } catch {
-      // Table may not exist yet (will be created by CREATE TABLE IF NOT EXISTS above)
-    }
+  } catch {
+    // Table may not exist yet
   }
 }
 
-export const db = g.__clawgent_db;
+// During build, db is undefined — all functions below handle this.
+export const db = g.__clawgent_db as Database.Database;
 
 // --- Prepared statements (cached for performance) ---
+// During build, db is undefined so we skip preparing statements.
+// All exported functions check _isBuild and return early.
 
-const stmtUpsert = db.prepare(`
+const stmtUpsert = _isBuild ? null : db.prepare(`
   INSERT INTO instances (id, containerName, port, token, status, dashboardUrl, createdAt, expiresAt, logs, provider, modelId, persona, userId)
   VALUES (@id, @containerName, @port, @token, @status, @dashboardUrl, @createdAt, @expiresAt, @logs, @provider, @modelId, @persona, @userId)
   ON CONFLICT(id) DO UPDATE SET
@@ -148,7 +154,7 @@ const stmtUpsert = db.prepare(`
 `);
 
 // Flush-only upsert: NEVER touches userId (prevents periodic flush from wiping user ownership).
-const stmtFlush = db.prepare(`
+const stmtFlush = _isBuild ? null : db.prepare(`
   INSERT INTO instances (id, containerName, port, token, status, dashboardUrl, createdAt, expiresAt, logs, provider, modelId, persona, userId)
   VALUES (@id, @containerName, @port, @token, @status, @dashboardUrl, @createdAt, @expiresAt, @logs, @provider, @modelId, @persona, @userId)
   ON CONFLICT(id) DO UPDATE SET
@@ -164,21 +170,21 @@ const stmtFlush = db.prepare(`
     persona       = @persona
 `);
 
-const stmtGetById = db.prepare("SELECT * FROM instances WHERE id = ?");
-const stmtGetByUserId = db.prepare("SELECT * FROM instances WHERE userId = ? LIMIT 1");
-const stmtGetByUserIdActive = db.prepare("SELECT * FROM instances WHERE userId = ? AND status IN ('running', 'starting') LIMIT 1");
-const stmtGetByTokenActive = db.prepare("SELECT * FROM instances WHERE token = ? AND status IN ('running', 'starting') LIMIT 1");
-const stmtGetOrphaned = db.prepare("SELECT * FROM instances WHERE status IN ('error', 'stopped')");
-const stmtDeleteOldStale = db.prepare("DELETE FROM instances WHERE status IN ('error', 'stopped') AND createdAt < ?");
-const stmtGetAll = db.prepare("SELECT * FROM instances");
-const stmtDelete = db.prepare("DELETE FROM instances WHERE id = ?");
-const stmtCount = db.prepare("SELECT COUNT(*) as count FROM instances");
-const stmtGetIds = db.prepare("SELECT id FROM instances");
+const stmtGetById = _isBuild ? null : db.prepare("SELECT * FROM instances WHERE id = ?");
+const stmtGetByUserId = _isBuild ? null : db.prepare("SELECT * FROM instances WHERE userId = ? LIMIT 1");
+const stmtGetByUserIdActive = _isBuild ? null : db.prepare("SELECT * FROM instances WHERE userId = ? AND status IN ('running', 'starting') LIMIT 1");
+const stmtGetByTokenActive = _isBuild ? null : db.prepare("SELECT * FROM instances WHERE token = ? AND status IN ('running', 'starting') LIMIT 1");
+const stmtGetOrphaned = _isBuild ? null : db.prepare("SELECT * FROM instances WHERE status IN ('error', 'stopped')");
+const stmtDeleteOldStale = _isBuild ? null : db.prepare("DELETE FROM instances WHERE status IN ('error', 'stopped') AND createdAt < ?");
+const stmtGetAll = _isBuild ? null : db.prepare("SELECT * FROM instances");
+const stmtDelete = _isBuild ? null : db.prepare("DELETE FROM instances WHERE id = ?");
+const stmtCount = _isBuild ? null : db.prepare("SELECT COUNT(*) as count FROM instances");
+const stmtGetIds = _isBuild ? null : db.prepare("SELECT id FROM instances");
 
 // --- WhatsApp prepared statements ---
 
-const stmtGetWaSession = db.prepare("SELECT * FROM whatsapp_sessions WHERE phone = ?");
-const stmtUpsertWaSession = db.prepare(`
+const stmtGetWaSession = _isBuild ? null : db.prepare("SELECT * FROM whatsapp_sessions WHERE phone = ?");
+const stmtUpsertWaSession = _isBuild ? null : db.prepare(`
   INSERT INTO whatsapp_sessions (phone, userId, currentState, selectedPersona, selectedProvider, instanceId, activeAgent, createdAt, updatedAt)
   VALUES (@phone, @userId, @currentState, @selectedPersona, @selectedProvider, @instanceId, @activeAgent, @createdAt, @updatedAt)
   ON CONFLICT(phone) DO UPDATE SET
@@ -189,45 +195,38 @@ const stmtUpsertWaSession = db.prepare(`
     activeAgent     = @activeAgent,
     updatedAt       = @updatedAt
 `);
-const stmtDeleteWaSession = db.prepare("DELETE FROM whatsapp_sessions WHERE phone = ?");
-const stmtInsertWaMessage = db.prepare(`
+const stmtDeleteWaSession = _isBuild ? null : db.prepare("DELETE FROM whatsapp_sessions WHERE phone = ?");
+const stmtInsertWaMessage = _isBuild ? null : db.prepare(`
   INSERT INTO whatsapp_messages (phone, direction, content, createdAt)
   VALUES (@phone, @direction, @content, @createdAt)
 `);
-const stmtGetWaMessages = db.prepare("SELECT * FROM whatsapp_messages WHERE phone = ? ORDER BY id DESC LIMIT ?");
-const stmtGetActiveWaSessions = db.prepare("SELECT * FROM whatsapp_sessions WHERE currentState = 'ACTIVE' AND instanceId IS NOT NULL");
+const stmtGetWaMessages = _isBuild ? null : db.prepare("SELECT * FROM whatsapp_messages WHERE phone = ? ORDER BY id DESC LIMIT ?");
+const stmtGetActiveWaSessions = _isBuild ? null : db.prepare("SELECT * FROM whatsapp_sessions WHERE currentState = 'ACTIVE' AND instanceId IS NOT NULL");
 
 // --- Linked accounts prepared statements ---
 
-const stmtGetLinkedByWebUser = db.prepare("SELECT * FROM linked_accounts WHERE web_user_id = ? AND unlinked_at IS NULL");
-const stmtGetLinkedByPhone = db.prepare("SELECT * FROM linked_accounts WHERE wa_phone = ? AND unlinked_at IS NULL");
-const stmtInsertLinked = db.prepare("INSERT INTO linked_accounts (web_user_id, wa_phone, linked_at) VALUES (?, ?, ?)");
-const stmtSoftDeleteLinkedByPhone = db.prepare("UPDATE linked_accounts SET unlinked_at = ? WHERE wa_phone = ? AND unlinked_at IS NULL");
-const stmtHardDeleteLinkedByPhone = db.prepare("DELETE FROM linked_accounts WHERE wa_phone = ?");
-const stmtWasUnlinkedPair = db.prepare("SELECT 1 FROM linked_accounts WHERE web_user_id = ? AND wa_phone = ? AND unlinked_at IS NOT NULL LIMIT 1");
-const stmtUpdateInstanceUserId = db.prepare("UPDATE instances SET userId = ? WHERE id = ?");
+const stmtGetLinkedByWebUser = _isBuild ? null : db.prepare("SELECT * FROM linked_accounts WHERE web_user_id = ? AND unlinked_at IS NULL");
+const stmtGetLinkedByPhone = _isBuild ? null : db.prepare("SELECT * FROM linked_accounts WHERE wa_phone = ? AND unlinked_at IS NULL");
+const stmtInsertLinked = _isBuild ? null : db.prepare("INSERT INTO linked_accounts (web_user_id, wa_phone, linked_at) VALUES (?, ?, ?)");
+const stmtSoftDeleteLinkedByPhone = _isBuild ? null : db.prepare("UPDATE linked_accounts SET unlinked_at = ? WHERE wa_phone = ? AND unlinked_at IS NULL");
+const stmtHardDeleteLinkedByPhone = _isBuild ? null : db.prepare("DELETE FROM linked_accounts WHERE wa_phone = ?");
+const stmtWasUnlinkedPair = _isBuild ? null : db.prepare("SELECT 1 FROM linked_accounts WHERE web_user_id = ? AND wa_phone = ? AND unlinked_at IS NOT NULL LIMIT 1");
+const stmtUpdateInstanceUserId = _isBuild ? null : db.prepare("UPDATE instances SET userId = ? WHERE id = ?");
 
 // --- Link codes prepared statements ---
 
-const stmtDeleteLinkCodesByPhone = db.prepare("DELETE FROM link_codes WHERE phone = ?");
-const stmtInsertLinkCode = db.prepare(`
+const stmtDeleteLinkCodesByPhone = _isBuild ? null : db.prepare("DELETE FROM link_codes WHERE phone = ?");
+const stmtInsertLinkCode = _isBuild ? null : db.prepare(`
   INSERT INTO link_codes (code, phone, expires_at, created_at, used)
   VALUES (@code, @phone, @expires_at, @created_at, 0)
 `);
-const stmtGetLinkCode = db.prepare(
+const stmtGetLinkCode = _isBuild ? null : db.prepare(
   "SELECT * FROM link_codes WHERE code = ? AND used = 0 AND expires_at > ?"
 );
-const stmtMarkLinkCodeUsed = db.prepare("UPDATE link_codes SET used = 1 WHERE code = ?");
-const stmtCleanupExpiredLinkCodes = db.prepare(
+const stmtMarkLinkCodeUsed = _isBuild ? null : db.prepare("UPDATE link_codes SET used = 1 WHERE code = ?");
+const stmtCleanupExpiredLinkCodes = _isBuild ? null : db.prepare(
   "DELETE FROM link_codes WHERE expires_at < ? OR used = 1"
 );
-
-/** True during `next build` — skip all DB writes to prevent wiping userId.
- *  CLAWGENT_BUILD is set explicitly in package.json build script.
- *  NEXT_PHASE is set by Next.js but may not propagate to workers. */
-function isBuildTime(): boolean {
-  return process.env.CLAWGENT_BUILD === "1" || process.env.NEXT_PHASE === "phase-production-build";
-}
 
 function rowToInstance(row: Record<string, unknown>): Instance {
   return {
@@ -265,63 +264,72 @@ function instanceToRow(inst: Instance): Record<string, unknown> {
 }
 
 export function dbGetInstance(id: string): Instance | undefined {
-  const row = stmtGetById.get(id) as Record<string, unknown> | undefined;
+  if (_isBuild) return undefined;
+  const row = stmtGetById!.get(id) as Record<string, unknown> | undefined;
   return row ? rowToInstance(row) : undefined;
 }
 
 export function dbGetInstanceByUserId(userId: string): Instance | undefined {
-  const row = stmtGetByUserId.get(userId) as Record<string, unknown> | undefined;
+  if (_isBuild) return undefined;
+  const row = stmtGetByUserId!.get(userId) as Record<string, unknown> | undefined;
   return row ? rowToInstance(row) : undefined;
 }
 
 export function dbGetInstanceByUserIdActive(userId: string): Instance | undefined {
-  const row = stmtGetByUserIdActive.get(userId) as Record<string, unknown> | undefined;
+  if (_isBuild) return undefined;
+  const row = stmtGetByUserIdActive!.get(userId) as Record<string, unknown> | undefined;
   return row ? rowToInstance(row) : undefined;
 }
 
 export function dbGetInstanceByTokenActive(token: string): Instance | undefined {
-  const row = stmtGetByTokenActive.get(token) as Record<string, unknown> | undefined;
+  if (_isBuild) return undefined;
+  const row = stmtGetByTokenActive!.get(token) as Record<string, unknown> | undefined;
   return row ? rowToInstance(row) : undefined;
 }
 
 export function dbGetOrphanedInstances(): Instance[] {
-  const rows = stmtGetOrphaned.all() as Record<string, unknown>[];
+  if (_isBuild) return [];
+  const rows = stmtGetOrphaned!.all() as Record<string, unknown>[];
   return rows.map(rowToInstance);
 }
 
 export function dbDeleteOldStaleInstances(cutoffISO: string): number {
-  const result = stmtDeleteOldStale.run(cutoffISO);
+  if (_isBuild) return 0;
+  const result = stmtDeleteOldStale!.run(cutoffISO);
   return result.changes;
 }
 
 export function dbGetAllInstances(): Instance[] {
-  const rows = stmtGetAll.all() as Record<string, unknown>[];
+  if (_isBuild) return [];
+  const rows = stmtGetAll!.all() as Record<string, unknown>[];
   return rows.map(rowToInstance);
 }
 
 export function dbUpsertInstance(inst: Instance): void {
-  if (isBuildTime()) return;
-  stmtUpsert.run(instanceToRow(inst));
+  if (_isBuild) return;
+  stmtUpsert!.run(instanceToRow(inst));
 }
 
 /** Flush-safe upsert: persists status/logs/etc but NEVER overwrites userId. */
 export function dbFlushInstance(inst: Instance): void {
-  if (isBuildTime()) return;
-  stmtFlush.run(instanceToRow(inst));
+  if (_isBuild) return;
+  stmtFlush!.run(instanceToRow(inst));
 }
 
 export function dbDeleteInstance(id: string): void {
-  if (isBuildTime()) return;
-  stmtDelete.run(id);
+  if (_isBuild) return;
+  stmtDelete!.run(id);
 }
 
 export function dbCount(): number {
-  const row = stmtCount.get() as { count: number };
+  if (_isBuild) return 0;
+  const row = stmtCount!.get() as { count: number };
   return row.count;
 }
 
 export function dbGetAllIds(): string[] {
-  const rows = stmtGetIds.all() as { id: string }[];
+  if (_isBuild) return [];
+  const rows = stmtGetIds!.all() as { id: string }[];
   return rows.map((r) => r.id);
 }
 
@@ -348,12 +356,14 @@ export interface WhatsAppMessage {
 }
 
 export function dbGetWaSession(phone: string): WhatsAppSession | undefined {
-  const row = stmtGetWaSession.get(phone) as WhatsAppSession | undefined;
+  if (_isBuild) return undefined;
+  const row = stmtGetWaSession!.get(phone) as WhatsAppSession | undefined;
   return row ?? undefined;
 }
 
 export function dbUpsertWaSession(session: WhatsAppSession): void {
-  stmtUpsertWaSession.run({
+  if (_isBuild) return;
+  stmtUpsertWaSession!.run({
     ...session,
     selectedPersona: session.selectedPersona ?? null,
     selectedProvider: session.selectedProvider ?? null,
@@ -363,19 +373,23 @@ export function dbUpsertWaSession(session: WhatsAppSession): void {
 }
 
 export function dbDeleteWaSession(phone: string): void {
-  stmtDeleteWaSession.run(phone);
+  if (_isBuild) return;
+  stmtDeleteWaSession!.run(phone);
 }
 
 export function dbInsertWaMessage(msg: Omit<WhatsAppMessage, "id">): void {
-  stmtInsertWaMessage.run(msg);
+  if (_isBuild) return;
+  stmtInsertWaMessage!.run(msg);
 }
 
 export function dbGetWaMessages(phone: string, limit = 50): WhatsAppMessage[] {
-  return stmtGetWaMessages.all(phone, limit) as WhatsAppMessage[];
+  if (_isBuild) return [];
+  return stmtGetWaMessages!.all(phone, limit) as WhatsAppMessage[];
 }
 
 export function dbGetActiveWaSessions(): WhatsAppSession[] {
-  return stmtGetActiveWaSessions.all() as WhatsAppSession[];
+  if (_isBuild) return [];
+  return stmtGetActiveWaSessions!.all() as WhatsAppSession[];
 }
 
 // --- Linked accounts types & CRUD ---
@@ -388,31 +402,36 @@ export interface LinkedAccount {
 }
 
 export function dbGetLinkedByWebUser(webUserId: string): LinkedAccount | undefined {
-  return stmtGetLinkedByWebUser.get(webUserId) as LinkedAccount | undefined;
+  if (_isBuild) return undefined;
+  return stmtGetLinkedByWebUser!.get(webUserId) as LinkedAccount | undefined;
 }
 
 export function dbGetLinkedByPhone(phone: string): LinkedAccount | undefined {
-  return stmtGetLinkedByPhone.get(phone) as LinkedAccount | undefined;
+  if (_isBuild) return undefined;
+  return stmtGetLinkedByPhone!.get(phone) as LinkedAccount | undefined;
 }
 
 export function dbInsertLinkedAccount(webUserId: string, phone: string): void {
-  // Clear any previous unlinked records for this phone before inserting
-  stmtHardDeleteLinkedByPhone.run(phone);
-  stmtInsertLinked.run(webUserId, phone, new Date().toISOString());
+  if (_isBuild) return;
+  stmtHardDeleteLinkedByPhone!.run(phone);
+  stmtInsertLinked!.run(webUserId, phone, new Date().toISOString());
 }
 
 /** Soft-delete: marks the link as unlinked (preserves history for re-link prevention). */
 export function dbDeleteLinkedByPhone(phone: string): void {
-  stmtSoftDeleteLinkedByPhone.run(new Date().toISOString(), phone);
+  if (_isBuild) return;
+  stmtSoftDeleteLinkedByPhone!.run(new Date().toISOString(), phone);
 }
 
 /** Check if a specific web user was previously unlinked from a phone. */
 export function dbWasUnlinkedPair(webUserId: string, phone: string): boolean {
-  return stmtWasUnlinkedPair.get(webUserId, phone) !== undefined;
+  if (_isBuild) return false;
+  return stmtWasUnlinkedPair!.get(webUserId, phone) !== undefined;
 }
 
 export function dbUpdateInstanceUserId(instanceId: string, newUserId: string): void {
-  stmtUpdateInstanceUserId.run(newUserId, instanceId);
+  if (_isBuild) return;
+  stmtUpdateInstanceUserId!.run(newUserId, instanceId);
 }
 
 // --- Link codes types & CRUD ---
@@ -427,8 +446,9 @@ export interface LinkCode {
 
 /** Insert a link code, removing any previous codes for the same phone. */
 export function dbInsertLinkCode(code: string, phone: string, expiresAt: string): void {
-  stmtDeleteLinkCodesByPhone.run(phone);
-  stmtInsertLinkCode.run({
+  if (_isBuild) return;
+  stmtDeleteLinkCodesByPhone!.run(phone);
+  stmtInsertLinkCode!.run({
     code,
     phone,
     expires_at: expiresAt,
@@ -438,24 +458,29 @@ export function dbInsertLinkCode(code: string, phone: string, expiresAt: string)
 
 /** Get a valid (unexpired, unused) link code. */
 export function dbGetLinkCode(code: string): LinkCode | undefined {
-  return stmtGetLinkCode.get(code, new Date().toISOString()) as LinkCode | undefined;
+  if (_isBuild) return undefined;
+  return stmtGetLinkCode!.get(code, new Date().toISOString()) as LinkCode | undefined;
 }
 
 /** Mark a link code as used. */
 export function dbMarkLinkCodeUsed(code: string): void {
-  stmtMarkLinkCodeUsed.run(code);
+  if (_isBuild) return;
+  stmtMarkLinkCodeUsed!.run(code);
 }
 
 /** Delete expired and used link codes. */
 export function dbCleanupExpiredLinkCodes(): void {
-  stmtCleanupExpiredLinkCodes.run(new Date().toISOString());
+  if (_isBuild) return;
+  stmtCleanupExpiredLinkCodes!.run(new Date().toISOString());
 }
 
-// Cleanup expired link codes every 30 minutes
-setInterval(() => {
-  try {
-    dbCleanupExpiredLinkCodes();
-  } catch {
-    // Non-fatal
-  }
-}, 30 * 60 * 1000);
+// Cleanup expired link codes every 30 minutes (skip during build)
+if (!_isBuild) {
+  setInterval(() => {
+    try {
+      dbCleanupExpiredLinkCodes();
+    } catch {
+      // Non-fatal
+    }
+  }, 30 * 60 * 1000);
+}
