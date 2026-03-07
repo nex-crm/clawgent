@@ -9,6 +9,7 @@ import {
   dbGetInstanceByUserIdActive,
   dbGetInstanceByTokenActive,
   dbGetOrphanedInstances,
+  dbFlushInstance,
   dbGetLinkedByWebUser,
   dbGetLinkedByPhone,
 } from "./db";
@@ -57,11 +58,16 @@ class InstanceStore {
       this.cache.set(inst.id, inst);
     }
 
-    // Periodic flush: persist dirty in-memory instances to SQLite
-    this.flushTimer = setInterval(() => this.flush(), 5000);
-    // Don't block process exit
-    if (this.flushTimer && typeof this.flushTimer === "object" && "unref" in this.flushTimer) {
-      this.flushTimer.unref();
+    // Periodic flush: persist dirty in-memory instances to SQLite.
+    // Skip during build — Next.js evaluates server modules at build time
+    // and the flush timer would write cached instances (without userId)
+    // back to the DB, wiping user ownership.
+    if (process.env.CLAWGENT_BUILD !== "1") {
+      this.flushTimer = setInterval(() => this.flush(), 5000);
+      // Don't block process exit
+      if (this.flushTimer && typeof this.flushTimer === "object" && "unref" in this.flushTimer) {
+        this.flushTimer.unref();
+      }
     }
   }
 
@@ -147,7 +153,7 @@ class InstanceStore {
    */
   flush(): void {
     for (const [, inst] of this.cache) {
-      dbUpsertInstance(inst);
+      dbFlushInstance(inst);
     }
   }
 
