@@ -181,6 +181,11 @@ jobs:
             docker exec -u root "$CONTAINER" chown -R node:node /home/node/.openclaw 2>/dev/null || true
             echo "Running openclaw doctor --fix..."
             docker exec "$CONTAINER" node /app/openclaw.mjs doctor --fix 2>/dev/null || echo "WARNING: doctor --fix failed (non-fatal)"
+            echo "Injecting openclaw.json config..."
+            OPENCLAW_CONFIG_B64=$(echo -n "{\"gateway\":{\"controlUi\":{\"allowedOrigins\":[\"https://clawgent.ai\",\"http://localhost:3001\"]},\"trustedProxies\":[\"172.17.0.0/16\",\"127.0.0.1\"]},\"tools\":{\"profile\":\"full\"}}" | base64 -w 0)
+            docker exec "$CONTAINER" sh -c "echo $OPENCLAW_CONFIG_B64 | base64 -d > /home/node/.openclaw/openclaw.json"
+            docker exec -u root "$CONTAINER" chown node:node /home/node/.openclaw/openclaw.json 2>/dev/null || true
+            echo "openclaw.json injected"
             echo "Waiting for health..."
             HEALTHY=false
             for i in $(seq 1 15); do
