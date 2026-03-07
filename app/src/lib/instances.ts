@@ -9,7 +9,6 @@ import {
   dbGetInstanceByUserIdActive,
   dbGetInstanceByTokenActive,
   dbGetOrphanedInstances,
-  dbDeleteOldStaleInstances,
   dbGetLinkedByWebUser,
   dbGetLinkedByPhone,
 } from "./db";
@@ -296,18 +295,22 @@ export async function reconcileWithDocker(): Promise<void> {
       }
     }
 
-    // Delete stale instances (error/stopped) older than 1 hour
-    // First, collect IDs to evict from cache
+    // Delete stale instances (error/stopped) older than 1 hour,
+    // but NEVER delete instances that have a userId (real user deployments).
     const staleToEvict = dbGetOrphanedInstances()
       .filter(inst => inst.createdAt < new Date(Date.now() - 60 * 60 * 1000).toISOString())
+      .filter(inst => !inst.userId)
       .map(inst => inst.id);
 
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    const deleted = dbDeleteOldStaleInstances(oneHourAgo);
-    if (deleted > 0) {
-      console.log(`[reconcile] Cleaned up ${deleted} stale instance(s) older than 1 hour`);
+    if (staleToEvict.length > 0) {
+      let deleted = 0;
       for (const id of staleToEvict) {
+        dbDeleteInstance(id);
         instances.delete(id);
+        deleted++;
+      }
+      if (deleted > 0) {
+        console.log(`[reconcile] Cleaned up ${deleted} stale instance(s) older than 1 hour`);
       }
     }
   } catch {
