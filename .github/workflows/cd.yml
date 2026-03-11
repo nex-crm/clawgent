@@ -171,7 +171,7 @@ jobs:
           aws s3 cp s3://${{ secrets.S3_DEPLOY_BUCKET }}/deploy-config/ecosystem.config.js \
             /opt/clawgent/ecosystem.config.js
           chown -R ubuntu:ubuntu /opt/clawgent/app /opt/clawgent/ecosystem.config.js
-          echo "Files synced from S3"'
+          echo "Files synced from S3 (ownership set to ubuntu)"'
 
       - name: Pull OpenClaw Docker image
         env:
@@ -213,7 +213,7 @@ jobs:
             "NEXT_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com" \
             | base64 -w 0)
           ssm_run "Write .env.local" 30 \
-            "printf '%s' '${B64_ENV}' | base64 -d > /opt/clawgent/app/.env.local && chmod 600 /opt/clawgent/app/.env.local && chown ubuntu:ubuntu /opt/clawgent/app/.env.local && echo '.env.local written successfully'"
+            "printf '%s' '${B64_ENV}' | base64 -d > /opt/clawgent/app/.env.local && chown ubuntu:ubuntu /opt/clawgent/app/.env.local && chmod 600 /opt/clawgent/app/.env.local && echo '.env.local written successfully'"
 
       - name: Stop app and kill orphan processes
         run: |
@@ -246,9 +246,7 @@ jobs:
           source /tmp/ssm_run.sh
           ssm_run "Install deps and build" 600 '
           set -euo pipefail
-          cd /opt/clawgent/app
-          npm ci --production=false
-          CLAWGENT_BUILD=1 npm run build'
+          sudo -u ubuntu bash -c "cd /opt/clawgent/app && npm ci --production=false && CLAWGENT_BUILD=1 npm run build"'
 
       - name: Reload PM2
         run: |
@@ -260,10 +258,10 @@ jobs:
           pkill -f "tsx.*server" 2>/dev/null || true
           pkill -f "server\.ts" 2>/dev/null || true
           sleep 1
-          if sudo -u ubuntu pm2 restart clawgent --update-env 2>/dev/null; then
-            echo "PM2 restart succeeded"
+          if sudo -u ubuntu pm2 reload ecosystem.config.js --update-env 2>/dev/null; then
+            echo "PM2 reload succeeded"
           else
-            echo "PM2 restart failed — falling back to delete + start"
+            echo "PM2 reload failed — falling back to delete + start"
             sudo -u ubuntu pm2 delete clawgent 2>/dev/null || true
             sudo -u ubuntu pm2 start ecosystem.config.js
           fi
@@ -298,9 +296,9 @@ jobs:
           done
           echo "::error::Health check FAILED after ${MAX_ATTEMPTS} attempts"
           echo "=== PM2 Status ==="
-          pm2 status
+          sudo -u ubuntu pm2 status
           echo "=== PM2 Logs (last 50 lines) ==="
-          pm2 logs clawgent --nostream --lines 50 || true
+          sudo -u ubuntu pm2 logs clawgent --nostream --lines 50 || true
           exit 1'
 
       - name: Rollback on failure
@@ -323,8 +321,8 @@ jobs:
           fi
           echo "Restarting PM2..."
           cd /opt/clawgent
-          pm2 restart clawgent 2>/dev/null || pm2 start ecosystem.config.js 2>/dev/null || true
-          pm2 save 2>/dev/null || true
+          sudo -u ubuntu pm2 restart clawgent 2>/dev/null || sudo -u ubuntu pm2 start ecosystem.config.js 2>/dev/null || true
+          sudo -u ubuntu pm2 save 2>/dev/null || true
           echo ""
           echo "=== MANUAL INTERVENTION MAY BE REQUIRED ==="
           echo "1. Check PM2 logs: pm2 logs clawgent"

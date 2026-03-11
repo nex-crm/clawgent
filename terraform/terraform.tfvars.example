@@ -1,0 +1,11 @@
+aws_region       = "us-east-1"
+s3_deploy_bucket = "your-deploy-bucket-name"
+ec2_instance_id  = "i-0123456789abcdef0"
+
+# Optional: SNS topic for alarm notifications
+# alarm_sns_topic_arn = "arn:aws:sns:us-east-1:123456789012:clawgent-alerts"
+
+# Optional: tune CPU alarm sensitivity
+# cpu_alarm_threshold          = 80
+# cpu_alarm_evaluation_periods = 3
+# cpu_alarm_period_seconds     = 300

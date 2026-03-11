@@ -484,13 +484,10 @@ async function injectGatewayConfig(instance: Instance, modelId?: string): Promis
     config.agents = agents;
   }
 
-  // OpenClaw 2026.3.2+ defaults tools.profile to "messaging" for new installs,
-  // which restricts the tool surface. Set to "default" for full capabilities.
+  // OpenClaw 2026.3.2 only accepts: "minimal", "coding", "messaging", "full"
   const tools = (config.tools || {}) as Record<string, unknown>;
-  if (!tools.profile) {
-    tools.profile = "default";
-    config.tools = tools;
-  }
+  tools.profile = "full";
+  config.tools = tools;
 
   // Write config into container
   const tmpDir = mkdtempSync(join(tmpdir(), "clawgent-gw-"));
