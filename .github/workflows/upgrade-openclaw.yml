@@ -269,6 +269,7 @@ jobs:
             EXISTING_CONFIG=$(docker exec "$CONTAINER" cat /home/node/.openclaw/openclaw.json 2>/dev/null || echo "{}")
             PATCHED_CONFIG=$(printf "%s" "$EXISTING_CONFIG" | jq '
               .gateway.trustedProxies = ["172.16.0.0/12", "127.0.0.1"] |
+              .gateway.bind = "lan" |
               .gateway.controlUi.allowedOrigins = ["https://clawgent.ai", "http://localhost:3001"] |
               .tools.profile = (if .tools.profile then .tools.profile else "default" end) |
               .commands.native = (.commands.native // "auto") |
