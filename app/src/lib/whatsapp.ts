@@ -85,7 +85,7 @@ function maskPhone(phone: string): string {
 
 function buildPersonaMenu(): string {
   return PERSONA_KEYS.map((key, i) => {
-    const p = PERSONA_CONFIGS[key];
+    const p = getPersona(key);
     return `${i + 1}. ${p.emoji} *${p.name}*`;
   }).join("\n");
 }
@@ -146,6 +146,13 @@ const PERSONA_DESCRIPTIONS: Record<string, string> = {
 const BUSINESS_PERSONAS = ["crm-agent", "sales-engagement", "marketing-automation", "revenue-intelligence"];
 const TECHNICAL_PERSONAS = ["enrichment-engine", "help-desk", "customer-success"];
 
+/** Safe accessor — prevents crash if a persona key is missing from PERSONA_CONFIGS */
+function getPersona(key: string): { emoji: string; name: string } {
+  const p = PERSONA_CONFIGS[key];
+  if (p) return p;
+  return { emoji: "🤖", name: key };
+}
+
 interface PlivoInteractiveList {
   type: "list";
   header?: { type: "text"; text: string };
@@ -195,19 +202,17 @@ function buildPersonaListInteractive(): PlivoInteractiveList {
         },
         {
           title: "Business Agents",
-          rows: BUSINESS_PERSONAS.map((key) => ({
-            id: key,
-            title: `${PERSONA_CONFIGS[key].emoji} ${PERSONA_CONFIGS[key].name}`,
-            description: PERSONA_DESCRIPTIONS[key],
-          })),
+          rows: BUSINESS_PERSONAS.map((key) => {
+            const p = getPersona(key);
+            return { id: key, title: `${p.emoji} ${p.name}`, description: PERSONA_DESCRIPTIONS[key] ?? "" };
+          }),
         },
         {
           title: "Technical Agents",
-          rows: TECHNICAL_PERSONAS.map((key) => ({
-            id: key,
-            title: `${PERSONA_CONFIGS[key].emoji} ${PERSONA_CONFIGS[key].name}`,
-            description: PERSONA_DESCRIPTIONS[key],
-          })),
+          rows: TECHNICAL_PERSONAS.map((key) => {
+            const p = getPersona(key);
+            return { id: key, title: `${p.emoji} ${p.name}`, description: PERSONA_DESCRIPTIONS[key] ?? "" };
+          }),
         },
       ],
     },
@@ -242,19 +247,17 @@ function buildPersonaListForAdd(): PlivoInteractiveList {
       sections: [
         {
           title: "Business Agents",
-          rows: BUSINESS_PERSONAS.map((key) => ({
-            id: key,
-            title: `${PERSONA_CONFIGS[key].emoji} ${PERSONA_CONFIGS[key].name}`,
-            description: PERSONA_DESCRIPTIONS[key],
-          })),
+          rows: BUSINESS_PERSONAS.map((key) => {
+            const p = getPersona(key);
+            return { id: key, title: `${p.emoji} ${p.name}`, description: PERSONA_DESCRIPTIONS[key] ?? "" };
+          }),
         },
         {
           title: "Technical Agents",
-          rows: TECHNICAL_PERSONAS.map((key) => ({
-            id: key,
-            title: `${PERSONA_CONFIGS[key].emoji} ${PERSONA_CONFIGS[key].name}`,
-            description: PERSONA_DESCRIPTIONS[key],
-          })),
+          rows: TECHNICAL_PERSONAS.map((key) => {
+            const p = getPersona(key);
+            return { id: key, title: `${p.emoji} ${p.name}`, description: PERSONA_DESCRIPTIONS[key] ?? "" };
+          }),
         },
       ],
     },
@@ -720,7 +723,7 @@ async function handlePersonaSelect(session: WhatsAppSession, text: string): Prom
   // Fuzzy match: try persona display name (e.g. "Marketing Pro" → "marketing-pro")
   if (!personaKey) {
     personaKey = PERSONA_KEYS.find((key) => {
-      const p = PERSONA_CONFIGS[key];
+      const p = getPersona(key);
       const name = p.name.toLowerCase();
       return name === trimmed || name.includes(trimmed) || trimmed.includes(name);
     });
@@ -733,7 +736,7 @@ async function handlePersonaSelect(session: WhatsAppSession, text: string): Prom
   }
 
   const posthog = getPostHogClient();
-  posthog?.capture({ distinctId: session.userId, event: "wa_persona_selected", properties: { source: "whatsapp", persona_id: personaKey, persona_name: PERSONA_CONFIGS[personaKey].name } });
+  posthog?.capture({ distinctId: session.userId, event: "wa_persona_selected", properties: { source: "whatsapp", persona_id: personaKey, persona_name: getPersona(personaKey).name } });
 
   session.selectedPersona = personaKey;
   session.currentState = "PROVIDER_SELECT";
@@ -807,7 +810,7 @@ async function handleApiKey(session: WhatsAppSession, text: string): Promise<str
   const provider = session.selectedProvider!;
   const persona = session.selectedPersona!;
   const config = PROVIDER_CONFIG[provider];
-  const personaConfig = PERSONA_CONFIGS[persona];
+  const personaConfig = PERSONA_CONFIGS[persona] ?? null;
 
   // Pre-check: is Docker available?
   if (!await isDockerAvailable()) {
@@ -825,7 +828,7 @@ async function handleApiKey(session: WhatsAppSession, text: string): Promise<str
     session.updatedAt = new Date().toISOString();
     dbUpsertWaSession(session);
     startInstanceListener(existing.id, existing.port, existing.token, session.phone);
-    return `You already have a running agent! Just type to chat with your ${personaConfig.emoji} ${personaConfig.name}.`;
+    return `You already have a running agent! Just type to chat with your ${personaConfig?.emoji ?? "🤖"} ${personaConfig?.name ?? "agent"}.`;
   }
 
   // Global instance cap
@@ -846,14 +849,14 @@ async function handleApiKey(session: WhatsAppSession, text: string): Promise<str
   dbUpsertWaSession(session);
 
   // Fire deployment in background
-  deployWhatsAppInstance(session, apiKey, config, personaConfig).catch((err) => {
+  deployWhatsAppInstance(session, apiKey, config, personaConfig ?? { name: persona, emoji: "🤖" }).catch((err) => {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[whatsapp] Deploy background error:", redactSensitive(msg));
   });
 
   return (
     `✅ key looks good. let's go.\n\n` +
-    `⏳ deploying your ${personaConfig.emoji} *${personaConfig.name}* agent...\n\n` +
+    `⏳ deploying your ${personaConfig?.emoji ?? "🤖"} *${personaConfig?.name ?? "agent"}* agent...\n\n` +
     `this takes about 60 seconds. i'll message you when it's ready.\n\n` +
     `_your competitors are still reading docs_ 😏`
   );
@@ -1055,9 +1058,10 @@ async function handleAddingAgentSelect(session: WhatsAppSession, text: string): 
 
   // Check if persona already exists as an agent
   const agents = await listInstanceAgents(inst);
-  const personaConfig = PERSONA_CONFIGS[personaKey];
+  const personaConfig = PERSONA_CONFIGS[personaKey] ?? null;
+  const pName = personaConfig?.name?.toLowerCase() ?? personaKey;
   const existing = agents.find(
-    (a) => a.id === personaKey || a.name.toLowerCase() === personaConfig.name.toLowerCase(),
+    (a) => a.id === personaKey || a.name.toLowerCase() === pName,
   );
 
   if (existing) {

@@ -136,6 +136,18 @@ jobs:
             echo "No database found at ${DB_PATH} — skipping backup (first deploy)"
           fi'
 
+      - name: Build Nex plugin
+        run: |
+          echo "Cloning nex-as-a-skill and building plugin..."
+          git clone --depth 1 https://github.com/nex-crm/nex-as-a-skill.git /tmp/nex-as-a-skill
+          cd /tmp/nex-as-a-skill/openclaw-plugin
+          npm ci
+          npm run build
+          # Copy built dist into the app tree so it gets included in S3 sync
+          mkdir -p ${{ github.workspace }}/app/plugins/nex/dist
+          cp -r dist/* ${{ github.workspace }}/app/plugins/nex/dist/
+          echo "Nex plugin built and staged for deploy"
+
       - name: Upload app to S3
         run: |
           aws s3 sync app/ s3://${{ secrets.S3_DEPLOY_BUCKET }}/deploy/ \
@@ -158,19 +170,21 @@ jobs:
           aws s3 sync s3://${{ secrets.S3_DEPLOY_BUCKET }}/deploy/ /opt/clawgent/app/ --delete
           aws s3 cp s3://${{ secrets.S3_DEPLOY_BUCKET }}/deploy-config/ecosystem.config.js \
             /opt/clawgent/ecosystem.config.js
+          chown -R ubuntu:ubuntu /opt/clawgent/app /opt/clawgent/ecosystem.config.js
           echo "Files synced from S3"'
 
       - name: Pull OpenClaw Docker image
+        env:
+          OPENCLAW_VERSION: ${{ vars.OPENCLAW_VERSION || '2026.3.8' }}
         run: |
           source /tmp/ssm_run.sh
-          ssm_run "Pull OpenClaw Docker image" 300 '
+          ssm_run "Pull OpenClaw Docker image" 300 "
           set -euo pipefail
-          OPENCLAW_VERSION="2026.3.2"
-          echo "Pulling OpenClaw ${OPENCLAW_VERSION} from ghcr.io..."
-          docker pull "ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}"
-          docker tag "ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}" clawgent-openclaw
-          echo "OpenClaw image ready:"
-          docker images clawgent-openclaw'
+          echo \"Pulling OpenClaw ${OPENCLAW_VERSION} from ghcr.io...\"
+          docker pull \"ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}\"
+          docker tag \"ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}\" clawgent-openclaw
+          echo \"OpenClaw image ready:\"
+          docker images clawgent-openclaw"
 
       - name: Write .env.local from secrets
         env:
@@ -180,6 +194,7 @@ jobs:
           PLIVO_AUTH_ID: ${{ secrets.PLIVO_AUTH_ID }}
           PLIVO_AUTH_TOKEN: ${{ secrets.PLIVO_AUTH_TOKEN }}
           PLIVO_WHATSAPP_NUMBER: ${{ secrets.PLIVO_WHATSAPP_NUMBER }}
+          NEXT_PUBLIC_POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
         run: |
           source /tmp/ssm_run.sh
           # Base64-encode the env file so it can be safely embedded in the SSM command
@@ -194,9 +209,37 @@ jobs:
             "PLIVO_AUTH_TOKEN=$PLIVO_AUTH_TOKEN" \
             "PLIVO_WHATSAPP_NUMBER=$PLIVO_WHATSAPP_NUMBER" \
             "PLIVO_WEBHOOK_URL=https://clawgent.ai/api/whatsapp/webhook" \
+            "NEXT_PUBLIC_POSTHOG_KEY=$NEXT_PUBLIC_POSTHOG_KEY" \
+            "NEXT_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com" \
             | base64 -w 0)
           ssm_run "Write .env.local" 30 \
-            "printf '%s' '${B64_ENV}' | base64 -d > /opt/clawgent/app/.env.local && chmod 600 /opt/clawgent/app/.env.local && echo '.env.local written successfully'"
+            "printf '%s' '${B64_ENV}' | base64 -d > /opt/clawgent/app/.env.local && chmod 600 /opt/clawgent/app/.env.local && chown ubuntu:ubuntu /opt/clawgent/app/.env.local && echo '.env.local written successfully'"
+
+      - name: Stop app and kill orphan processes
+        run: |
+          source /tmp/ssm_run.sh
+          ssm_run "Stop app before build" 60 '
+          set -euo pipefail
+          echo "Stopping PM2..."
+          sudo -u ubuntu pm2 stop clawgent 2>/dev/null || true
+          sleep 2
+          echo "Killing any orphan tsx/server.ts processes..."
+          pkill -f "tsx.*server" 2>/dev/null || true
+          pkill -f "server\.ts" 2>/dev/null || true
+          sleep 2
+          REMAINING=$(ps aux | grep -E "tsx|server\.ts" | grep -v grep | wc -l)
+          if [ "$REMAINING" -gt 0 ]; then
+            echo "WARNING: ${REMAINING} processes still running, force killing..."
+            pkill -9 -f "tsx" 2>/dev/null || true
+            pkill -9 -f "server\.ts" 2>/dev/null || true
+            sleep 1
+          fi
+          echo "Clearing stale WAL before build..."
+          DB="/opt/clawgent/app/data/clawgent.db"
+          if [ -f "$DB" ]; then
+            sqlite3 "$DB" "PRAGMA wal_checkpoint(TRUNCATE);" 2>/dev/null || true
+          fi
+          echo "Ready for build"'
 
       - name: Install dependencies and build on server
         run: |
@@ -205,7 +248,7 @@ jobs:
           set -euo pipefail
           cd /opt/clawgent/app
           npm ci --production=false
-          npm run build'
+          CLAWGENT_BUILD=1 npm run build'
 
       - name: Reload PM2
         run: |
@@ -213,14 +256,18 @@ jobs:
           ssm_run "Reload PM2" 60 '
           set -euo pipefail
           cd /opt/clawgent
-          if pm2 reload ecosystem.config.js --update-env 2>/dev/null; then
-            echo "PM2 reload succeeded"
+          echo "Ensuring no orphan processes before start..."
+          pkill -f "tsx.*server" 2>/dev/null || true
+          pkill -f "server\.ts" 2>/dev/null || true
+          sleep 1
+          if sudo -u ubuntu pm2 restart clawgent --update-env 2>/dev/null; then
+            echo "PM2 restart succeeded"
           else
-            echo "PM2 reload failed — falling back to delete + start"
-            pm2 delete clawgent 2>/dev/null || true
-            pm2 start ecosystem.config.js
+            echo "PM2 restart failed — falling back to delete + start"
+            sudo -u ubuntu pm2 delete clawgent 2>/dev/null || true
+            sudo -u ubuntu pm2 start ecosystem.config.js
           fi
-          pm2 save'
+          sudo -u ubuntu pm2 save'
 
       - name: Health check
         run: |
