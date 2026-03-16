@@ -465,6 +465,9 @@ async function injectGatewayConfig(instance: Instance, modelId?: string): Promis
   // Set gateway config: trust Docker bridge proxy + allow platform origin
   const gateway = (config.gateway || {}) as Record<string, unknown>;
   gateway.trustedProxies = TRUSTED_PROXIES;
+  // OpenClaw 2026.3.8 defaults to "loopback" which only binds to 127.0.0.1
+  // inside the container. Docker port-forwarding needs 0.0.0.0 ("lan").
+  gateway.bind = "lan";
 
   const controlUi = (gateway.controlUi || {}) as Record<string, unknown>;
   controlUi.allowedOrigins = ALLOWED_ORIGINS;

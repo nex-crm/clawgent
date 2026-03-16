@@ -1,12 +1,15 @@
 name: Upgrade OpenClaw Instances
 
 on:
+  schedule:
+    # Weekly: Sundays at 04:00 UTC
+    - cron: "0 4 * * 0"
   workflow_dispatch:
     inputs:
       version:
-        description: "OpenClaw version to deploy (e.g. 2026.3.2)"
+        description: "OpenClaw version (e.g. 2026.3.8) or 'latest'"
         required: true
-        default: "2026.3.2"
+        default: "latest"
       dry_run:
         description: "Dry run — list containers but don't upgrade"
         required: false
@@ -22,23 +25,43 @@ jobs:
     name: Upgrade Running Instances
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       id-token: write
       contents: read
 
     env:
       INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
-      OPENCLAW_VERSION: ${{ inputs.version }}
 
     steps:
-      - name: Validate version input
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve OpenClaw version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version || 'latest' }}
         run: |
-          if ! echo "$OPENCLAW_VERSION" | grep -qE '^[0-9]{4}\.[0-9]+\.[0-9]+$'; then
-            echo "::error::Invalid version format: $OPENCLAW_VERSION (expected YYYY.M.D, e.g. 2026.3.2)"
-            exit 1
+          if [ "$INPUT_VERSION" = "latest" ]; then
+            echo "Resolving latest OpenClaw tag from ghcr.io..."
+            TAGS=$(curl -sS "https://ghcr.io/v2/openclaw/openclaw/tags/list" \
+              | jq -r '.tags[]' 2>/dev/null \
+              | grep -E '^[0-9]{4}\.[0-9]+\.[0-9]+$' \
+              | sort -t. -k1,1n -k2,2n -k3,3n \
+              | tail -1)
+            if [ -z "$TAGS" ]; then
+              echo "::error::Could not resolve latest tag from ghcr.io"
+              exit 1
+            fi
+            echo "Resolved latest version: ${TAGS}"
+            echo "version=${TAGS}" >> "$GITHUB_OUTPUT"
+          else
+            if ! echo "$INPUT_VERSION" | grep -qE '^[0-9]{4}\.[0-9]+\.[0-9]+$'; then
+              echo "::error::Invalid version format: $INPUT_VERSION (expected YYYY.M.D, e.g. 2026.3.8)"
+              exit 1
+            fi
+            echo "version=${INPUT_VERSION}" >> "$GITHUB_OUTPUT"
           fi
-          echo "Upgrading to OpenClaw ${OPENCLAW_VERSION}"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -54,7 +77,7 @@ jobs:
             echo "=== $desc ==="
             local params
             params=$(jq -n --arg s "$script" \
-              '{"commands": ($s | split("\n") | map(select(length > 0)))}')
+              '{"commands": (["#!/bin/bash"] + ($s | split("\n") | map(select(length > 0))))}')
             local cmd_id
             cmd_id=$(aws ssm send-command \
               --instance-ids "$INSTANCE_ID" \
@@ -102,6 +125,8 @@ jobs:
           HELPER
 
       - name: Pull and tag new OpenClaw image
+        env:
+          OPENCLAW_VERSION: ${{ steps.version.outputs.version }}
         run: |
           source /tmp/ssm_run.sh
           ssm_run "Pull OpenClaw ${OPENCLAW_VERSION}" 300 "
@@ -125,8 +150,44 @@ jobs:
           echo ""
           echo "Container count: $(docker ps --filter "name=clawgent-" -q | wc -l)"'
 
+      - name: Build Nex plugin
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "Cloning nex-as-a-skill and building plugin..."
+          git clone --depth 1 https://github.com/nex-crm/nex-as-a-skill.git /tmp/nex-as-a-skill
+          cd /tmp/nex-as-a-skill/openclaw-plugin
+          npm ci
+          npm run build
+          echo "Plugin built successfully"
+          ls -la dist/
+
+      - name: Upload Nex plugin to S3
+        if: ${{ !inputs.dry_run }}
+        run: |
+          aws s3 sync /tmp/nex-as-a-skill/openclaw-plugin/dist/ \
+            s3://${{ secrets.S3_DEPLOY_BUCKET }}/plugins/nex/dist/ --delete
+          aws s3 cp /tmp/nex-as-a-skill/openclaw-plugin/package.json \
+            s3://${{ secrets.S3_DEPLOY_BUCKET }}/plugins/nex/package.json
+          aws s3 cp /tmp/nex-as-a-skill/openclaw-plugin/openclaw.plugin.json \
+            s3://${{ secrets.S3_DEPLOY_BUCKET }}/plugins/nex/openclaw.plugin.json
+          echo "Plugin uploaded to S3"
+
+      - name: Sync Nex plugin to server
+        if: ${{ !inputs.dry_run }}
+        run: |
+          source /tmp/ssm_run.sh
+          ssm_run "Sync Nex plugin from S3" 60 '
+          set -euo pipefail
+          mkdir -p /opt/clawgent/app/plugins/nex/dist
+          aws s3 sync s3://${{ secrets.S3_DEPLOY_BUCKET }}/plugins/nex/ /opt/clawgent/app/plugins/nex/
+          chown -R ubuntu:ubuntu /opt/clawgent/app/plugins/nex
+          echo "Plugin synced to server"
+          ls -la /opt/clawgent/app/plugins/nex/dist/'
+
       - name: Upgrade all running instances
-        if: inputs.dry_run == false
+        if: ${{ !inputs.dry_run }}
+        env:
+          OPENCLAW_VERSION: ${{ steps.version.outputs.version }}
         run: |
           source /tmp/ssm_run.sh
           ssm_run "Upgrade all instances" 900 '
@@ -202,7 +263,59 @@ jobs:
               echo "WARNING: ${CONTAINER} may not be fully healthy yet"
               UPGRADED=$((UPGRADED + 1))
             fi
-            # Inject nex memory plugin files (stock image doesn't include them)
+
+            # --- Config injection (openclaw.json) ---
+            echo "Injecting openclaw.json config..."
+            EXISTING_CONFIG=$(docker exec "$CONTAINER" cat /home/node/.openclaw/openclaw.json 2>/dev/null || echo "{}")
+            PATCHED_CONFIG=$(printf "%s" "$EXISTING_CONFIG" | jq '
+              .gateway.trustedProxies = ["172.16.0.0/12", "127.0.0.1"] |
+              .gateway.bind = "lan" |
+              .gateway.controlUi.allowedOrigins = ["https://clawgent.ai", "http://localhost:3001"] |
+              .tools.profile = (if .tools.profile then .tools.profile else "default" end) |
+              .commands.native = (.commands.native // "auto") |
+              .commands.nativeSkills = (.commands.nativeSkills // "auto")
+            ')
+            TMP_CFG="/tmp/openclaw_${CONTAINER}.json"
+            printf "%s" "$PATCHED_CONFIG" > "$TMP_CFG"
+            docker cp "$TMP_CFG" "${CONTAINER}:/home/node/.openclaw/openclaw.json"
+            docker exec -u root "$CONTAINER" chown node:node /home/node/.openclaw/openclaw.json
+            rm -f "$TMP_CFG"
+            docker exec "$CONTAINER" node /app/openclaw.mjs gateway reload 2>/dev/null || echo "WARNING: gateway reload failed (non-fatal)"
+            echo "Config injected"
+
+            # --- Agent re-registration ---
+            echo "Checking agent registration..."
+            AGENT_DIRS=$(docker exec "$CONTAINER" ls /home/node/.openclaw/agents/ 2>/dev/null || echo "")
+            if [ -n "$AGENT_DIRS" ]; then
+              REGISTERED=$(docker exec "$CONTAINER" node /app/openclaw.mjs agents list 2>/dev/null || echo "")
+              for AGENT_DIR in $AGENT_DIRS; do
+                if ! echo "$REGISTERED" | grep -qi "$AGENT_DIR"; then
+                  echo "Registering agent: ${AGENT_DIR}"
+                  docker exec "$CONTAINER" node /app/openclaw.mjs agents add \
+                    --dir "/home/node/.openclaw/agents/${AGENT_DIR}" 2>/dev/null || \
+                    echo "WARNING: Failed to register ${AGENT_DIR}"
+                  # Restore identity if IDENTITY.md exists
+                  IDENTITY_FILE="/home/node/.openclaw/agents/${AGENT_DIR}/IDENTITY.md"
+                  if docker exec "$CONTAINER" test -f "$IDENTITY_FILE" 2>/dev/null; then
+                    IDENTITY_NAME=$(docker exec "$CONTAINER" grep -oP "^identityName:\s*\K.+" "$IDENTITY_FILE" 2>/dev/null || echo "")
+                    IDENTITY_EMOJI=$(docker exec "$CONTAINER" grep -oP "^identityEmoji:\s*\K.+" "$IDENTITY_FILE" 2>/dev/null || echo "")
+                    if [ -n "$IDENTITY_NAME" ]; then
+                      echo "  Restoring identity: ${IDENTITY_EMOJI} ${IDENTITY_NAME}"
+                      docker exec "$CONTAINER" node /app/openclaw.mjs agents update "$AGENT_DIR" \
+                        --identityName "$IDENTITY_NAME" \
+                        ${IDENTITY_EMOJI:+--identityEmoji "$IDENTITY_EMOJI"} \
+                        2>/dev/null || echo "  WARNING: identity restore failed"
+                    fi
+                  fi
+                else
+                  echo "Agent ${AGENT_DIR} already registered"
+                fi
+              done
+            else
+              echo "No agent directories found"
+            fi
+
+            # --- Nex plugin injection ---
             PLUGIN_SRC="/opt/clawgent/app/plugins/nex"
             if [ -d "$PLUGIN_SRC" ]; then
               echo "Injecting nex plugin into ${CONTAINER}..."
@@ -224,8 +337,39 @@ jobs:
           echo "Final container status:"
           docker ps --filter "name=clawgent-" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"'
 
+      - name: Verify OpenClaw version
+        if: ${{ !inputs.dry_run }}
+        env:
+          OPENCLAW_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          source /tmp/ssm_run.sh
+          ssm_run "Verify OpenClaw version" 60 "
+          set -euo pipefail
+          echo \"Expected version: ${OPENCLAW_VERSION}\"
+          CONTAINERS=\$(docker ps --filter \"name=clawgent-\" --format \"{{.Names}}\" | grep -v \"^\$\" || true)
+          if [ -z \"\$CONTAINERS\" ]; then
+            echo \"No running containers to verify\"
+            exit 0
+          fi
+          ALL_OK=true
+          for CONTAINER in \$CONTAINERS; do
+            VERSION=\$(docker exec \"\$CONTAINER\" node /app/openclaw.mjs --version 2>/dev/null || echo \"unknown\")
+            echo \"\${CONTAINER}: \${VERSION}\"
+            if ! echo \"\$VERSION\" | grep -q \"${OPENCLAW_VERSION}\"; then
+              echo \"  WARNING: version mismatch\"
+              ALL_OK=false
+            fi
+          done
+          if [ \"\$ALL_OK\" = true ]; then
+            echo \"\"
+            echo \"All containers running expected version\"
+          else
+            echo \"\"
+            echo \"WARNING: Some containers have version mismatch\"
+          fi"
+
       - name: Dry run summary
-        if: inputs.dry_run == true
+        if: ${{ inputs.dry_run == true }}
         run: |
           echo "DRY RUN complete — no containers were modified."
           echo "Review the 'List running instances' step output above."
