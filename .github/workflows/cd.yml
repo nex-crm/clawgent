@@ -1,8 +1,14 @@
 name: CD
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
+    paths:
+      - "app/**"
+      - "deploy/**"
+      - "scripts/**"
+      - ".github/workflows/cd.yml"
 
 concurrency:
   group: cd-production
