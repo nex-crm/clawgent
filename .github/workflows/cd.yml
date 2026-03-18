@@ -224,14 +224,14 @@ jobs:
           sudo -u ubuntu pm2 stop clawgent 2>/dev/null || true
           sleep 2
           echo "Killing any orphan tsx/server.ts processes..."
-          pkill -f "tsx.*server" 2>/dev/null || true
-          pkill -f "server\.ts" 2>/dev/null || true
+          # Use pgrep + kill instead of pkill -f to avoid matching the SSM agent itself
+          PIDS=$(pgrep -f "tsx.*server" 2>/dev/null || true)
+          if [ -n "$PIDS" ]; then echo "Killing PIDs: $PIDS"; kill $PIDS 2>/dev/null || true; fi
           sleep 2
-          REMAINING=$(ps aux | grep -E "tsx|server\.ts" | grep -v grep | wc -l)
-          if [ "$REMAINING" -gt 0 ]; then
-            echo "WARNING: ${REMAINING} processes still running, force killing..."
-            pkill -9 -f "tsx" 2>/dev/null || true
-            pkill -9 -f "server\.ts" 2>/dev/null || true
+          PIDS=$(pgrep -f "tsx.*server" 2>/dev/null || true)
+          if [ -n "$PIDS" ]; then
+            echo "WARNING: processes still running, force killing: $PIDS"
+            kill -9 $PIDS 2>/dev/null || true
             sleep 1
           fi
           echo "Clearing stale WAL before build..."
@@ -255,9 +255,8 @@ jobs:
           set -euo pipefail
           cd /opt/clawgent
           echo "Ensuring no orphan processes before start..."
-          pkill -f "tsx.*server" 2>/dev/null || true
-          pkill -f "server\.ts" 2>/dev/null || true
-          sleep 1
+          PIDS=$(pgrep -f "tsx.*server" 2>/dev/null || true)
+          if [ -n "$PIDS" ]; then kill $PIDS 2>/dev/null || true; sleep 1; fi
           if sudo -u ubuntu pm2 reload ecosystem.config.js --update-env 2>/dev/null; then
             echo "PM2 reload succeeded"
           else
