@@ -2,6 +2,7 @@ import {
   dbGetWaSession,
   dbUpsertWaSession,
   dbDeleteWaSession,
+  dbDeleteWaMessagesByPhone,
   dbInsertWaMessage,
   dbGetLinkedByPhone,
   dbDeleteLinkedByPhone,
@@ -1540,6 +1541,7 @@ async function handleReset(phone: string): Promise<string | null> {
     }
   }
   dbDeleteWaSession(phone);
+  dbDeleteWaMessagesByPhone(phone);
   // Re-create session so the user's next message is treated as persona selection
   const now = new Date().toISOString();
   dbUpsertWaSession({
