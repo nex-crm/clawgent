@@ -3,6 +3,10 @@ name: CD
 on:
   push:
     branches: [main]
+    paths:
+      - 'app/**'
+      - 'plugins/**'
+      - '.github/workflows/cd.yml'
 
 concurrency:
   group: cd-production
